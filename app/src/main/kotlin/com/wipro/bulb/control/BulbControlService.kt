@@ -33,7 +33,9 @@ class BulbControlService : Service() {
         val bluetoothManager = getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
         bluetoothAdapter = bluetoothManager.adapter
         bluetoothLeScanner = bluetoothAdapter.bluetoothLeScanner
-        bulbController = BulbController(this, bluetoothAdapter)
+        bulbController = BulbController(this) { msg ->
+            Log.d("BulbControlService", msg)
+        }
 
         val filter = IntentFilter(BulbNotificationListener.ACTION_NOTIFICATION_RECEIVED)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
