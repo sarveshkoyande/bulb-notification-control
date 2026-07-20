@@ -28,3 +28,15 @@ Thumbs.db
 
 # Claude
 .claude/
+
+# Private capture data (contains device/broadcast data)
+_capture/
+bugreport-*.zip
+*.jpeg
+*.jpg
+
+# TinyTuya secrets (localKey!) — never commit
+devices.json
+tinytuya.json
+tuya-raw.json
+snapshot.json
