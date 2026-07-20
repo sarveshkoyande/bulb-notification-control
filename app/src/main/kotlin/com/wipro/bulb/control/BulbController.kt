@@ -66,17 +66,22 @@ class BulbController(
             .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
             .build()
 
-        onLog("Scanning for $BULB_MAC_ADDRESS ... (press the bulb's button now)")
+        onLog("Scanning 25s for $BULB_MAC_ADDRESS ... POWER-CYCLE the bulb now (switch off, then on).")
+        sawNonConnectable = false
         scanning = true
         s.startScan(listOf(filter), settings, scanCallback)
 
         handler.postDelayed({
             if (scanning) {
-                onLog("✗ Scan timeout: bulb not seen in 15s. Press its button and retry.")
+                if (sawNonConnectable) {
+                    onLog("✗ Timeout: bulb only ever advertised NON-connectable. It never opened a connect window while scanning.")
+                } else {
+                    onLog("✗ Timeout: bulb not seen at all in 25s. Check the MAC address and move phone closer.")
+                }
                 stopScan()
                 cleanup()
             }
-        }, 15000)
+        }, 25000)
     }
 
     private fun stopScan() {
@@ -86,12 +91,24 @@ class BulbController(
         }
     }
 
+    private var sawNonConnectable = false
+
     private val scanCallback = object : ScanCallback() {
         override fun onScanResult(callbackType: Int, result: ScanResult?) {
             if (result == null || !scanning) return
-            val connectable = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
-                result.isConnectable.toString() else "unknown"
-            onLog("Found bulb: rssi=${result.rssi}dBm connectable=$connectable")
+            val connectable = Build.VERSION.SDK_INT < Build.VERSION_CODES.O || result.isConnectable
+
+            if (!connectable) {
+                // Non-connectable advertisement: we cannot open GATT from this.
+                // Keep scanning in case the bulb flips to connectable (e.g. just after power-on).
+                if (!sawNonConnectable) {
+                    sawNonConnectable = true
+                    onLog("Seen (rssi=${result.rssi}dBm) but NON-connectable. Waiting for a connectable packet... power-cycle the bulb now.")
+                }
+                return
+            }
+
+            onLog("✓ Found CONNECTABLE bulb: rssi=${result.rssi}dBm")
             stopScan()
             connect(result.device)
         }
