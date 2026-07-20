@@ -5,8 +5,15 @@ import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothGatt
 import android.bluetooth.BluetoothGattCallback
 import android.bluetooth.BluetoothGattCharacteristic
+import android.bluetooth.le.BluetoothLeScanner
+import android.bluetooth.le.ScanCallback
+import android.bluetooth.le.ScanFilter
+import android.bluetooth.le.ScanResult
+import android.bluetooth.le.ScanSettings
 import android.content.Context
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import java.util.UUID
 
 class BulbController(
@@ -15,40 +22,96 @@ class BulbController(
 ) {
 
     private lateinit var bluetoothAdapter: BluetoothAdapter
+    private var scanner: BluetoothLeScanner? = null
     private var bluetoothGatt: BluetoothGatt? = null
-    private var isConnecting = false
+    private var isBusy = false
     private var pendingCommand: ByteArray? = null
+    private var scanning = false
 
-    // Queue of writable characteristics to try one after another.
+    private val handler = Handler(Looper.getMainLooper())
     private val writeQueue = ArrayDeque<BluetoothGattCharacteristic>()
 
     init {
         val manager = context.getSystemService(Context.BLUETOOTH_SERVICE) as android.bluetooth.BluetoothManager
         bluetoothAdapter = manager.adapter
+        scanner = bluetoothAdapter.bluetoothLeScanner
     }
 
     fun testCommand(command: ByteArray) {
-        if (isConnecting || bluetoothGatt != null) {
-            onLog("Busy (already connecting/connected). Wait a few seconds and retry.")
+        if (isBusy) {
+            onLog("Busy. Wait a few seconds and retry.")
             return
         }
-
-        isConnecting = true
+        isBusy = true
         pendingCommand = command
         writeQueue.clear()
+        startScan()
+    }
 
-        onLog("Connecting to $BULB_MAC_ADDRESS ...")
-        val device = bluetoothAdapter.getRemoteDevice(BULB_MAC_ADDRESS)
+    fun connectAndBlink() {
+        testCommand(byteArrayOf(0x01, 0x01, 0xFF.toByte()))
+    }
 
+    // ---- Step 1: scan so we connect only when the bulb is actually present ----
+
+    private fun startScan() {
+        val s = scanner
+        if (s == null) {
+            onLog("✗ No BLE scanner (is Bluetooth on?)")
+            cleanup()
+            return
+        }
+        val filter = ScanFilter.Builder().setDeviceAddress(BULB_MAC_ADDRESS).build()
+        val settings = ScanSettings.Builder()
+            .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
+            .build()
+
+        onLog("Scanning for $BULB_MAC_ADDRESS ... (press the bulb's button now)")
+        scanning = true
+        s.startScan(listOf(filter), settings, scanCallback)
+
+        handler.postDelayed({
+            if (scanning) {
+                onLog("✗ Scan timeout: bulb not seen in 15s. Press its button and retry.")
+                stopScan()
+                cleanup()
+            }
+        }, 15000)
+    }
+
+    private fun stopScan() {
+        if (scanning) {
+            scanning = false
+            try { scanner?.stopScan(scanCallback) } catch (_: Exception) {}
+        }
+    }
+
+    private val scanCallback = object : ScanCallback() {
+        override fun onScanResult(callbackType: Int, result: ScanResult?) {
+            if (result == null || !scanning) return
+            val connectable = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
+                result.isConnectable.toString() else "unknown"
+            onLog("Found bulb: rssi=${result.rssi}dBm connectable=$connectable")
+            stopScan()
+            connect(result.device)
+        }
+
+        override fun onScanFailed(errorCode: Int) {
+            onLog("✗ Scan failed (error=$errorCode)")
+            scanning = false
+            cleanup()
+        }
+    }
+
+    // ---- Step 2: connect ----
+
+    private fun connect(device: BluetoothDevice) {
+        onLog("Connecting...")
         bluetoothGatt = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             device.connectGatt(context, false, gattCallback, BluetoothDevice.TRANSPORT_LE)
         } else {
             device.connectGatt(context, false, gattCallback)
         }
-    }
-
-    fun connectAndBlink() {
-        testCommand(byteArrayOf(0x01, 0x01, 0xFF.toByte()))
     }
 
     private val gattCallback = object : BluetoothGattCallback() {
@@ -77,13 +140,12 @@ class BulbController(
             for (service in gatt.services) {
                 onLog("SVC ${short(service.uuid)}")
                 for (c in service.characteristics) {
-                    val props = propsToString(c.properties)
-                    onLog("   CHR ${short(c.uuid)} [$props]")
+                    onLog("   CHR ${short(c.uuid)} [${propsToString(c.properties)}]")
                     if (isWritable(c)) writeQueue.add(c)
                 }
             }
 
-            onLog("── ${writeQueue.size} writable characteristic(s). Writing command... ──")
+            onLog("── ${writeQueue.size} writable characteristic(s). Writing... ──")
             if (writeQueue.isEmpty()) {
                 onLog("✗ Nothing writable. Bulb likely rejects non-Wipro writes.")
                 gatt.disconnect()
@@ -106,7 +168,7 @@ class BulbController(
     private fun writeNext(gatt: BluetoothGatt) {
         val c = writeQueue.removeFirstOrNull()
         if (c == null) {
-            onLog("── Done. If bulb reacted, note which CHR write said OK just before. ──")
+            onLog("── Done. If the bulb reacted, note the CHR whose write said OK just before. ──")
             gatt.disconnect()
             return
         }
@@ -116,7 +178,6 @@ class BulbController(
                 if ((c.properties and BluetoothGattCharacteristic.PROPERTY_WRITE) != 0)
                     BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
                 else BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE
-            @Suppress("DEPRECATION")
             gatt.writeCharacteristic(c, cmd, writeType)
         } else {
             @Suppress("DEPRECATION")
@@ -143,7 +204,6 @@ class BulbController(
         return if (parts.isEmpty()) "-" else parts.joinToString(",")
     }
 
-    // Shorten 128-bit standard-base UUIDs to their 16-bit form for readability.
     private fun short(uuid: UUID?): String {
         if (uuid == null) return "null"
         val s = uuid.toString()
@@ -153,7 +213,8 @@ class BulbController(
     }
 
     private fun cleanup() {
-        isConnecting = false
+        isBusy = false
+        stopScan()
         bluetoothGatt?.close()
         bluetoothGatt = null
         writeQueue.clear()
