@@ -1,43 +1,23 @@
 #!/usr/bin/env sh
-
 #
-# Copyright 2015 the original author or authors.
+# Gradle startup script for UN*X
 #
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#      https://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-#
-
-##############################################################################
-##
-##  Gradle start up script for UN*X
-##
-##############################################################################
-
-PRG="$0"
-while [ -h "$PRG" ] ; do
-    ls=`ls -ld "$PRG"`
-    link=`expr "$ls" : '.*-> \(.*\)$'`
-    if expr "$link" : '/.*' > /dev/null; then
-        PRG="$link"
-    else
-        PRG=`dirname "$PRG"`"/$link"
-    fi
-done
-SAVED="`pwd`"
-cd "`dirname \"$PRG\"`/" >/dev/null
-APP_HOME="`pwd -P`"
-cd "$SAVED" >/dev/null
 
 APP_NAME="Gradle"
 APP_BASE_NAME=`basename "$0"`
+DIR=`dirname "$0"`
+APP_HOME=`cd "$DIR" && pwd`
 
-exec "$APP_HOME/gradle-8.1/bin/gradle" "$@"
+# Find gradle in standard location or use system gradle
+if [ -x "$APP_HOME/gradle-8.1/bin/gradle" ]; then
+    GRADLE_BIN="$APP_HOME/gradle-8.1/bin/gradle"
+else
+    GRADLE_BIN=`which gradle`
+fi
+
+if [ -z "$GRADLE_BIN" ]; then
+    echo "Error: gradle not found in PATH or standard location"
+    exit 1
+fi
+
+exec "$GRADLE_BIN" "$@"
