@@ -7,7 +7,7 @@ import android.bluetooth.BluetoothGattCallback
 import android.bluetooth.BluetoothGattCharacteristic
 import android.content.Context
 import android.os.Build
-import android.util.Log
+import java.util.UUID
 
 class BulbController(
     private val context: Context,
@@ -19,6 +19,9 @@ class BulbController(
     private var isConnecting = false
     private var pendingCommand: ByteArray? = null
 
+    // Queue of writable characteristics to try one after another.
+    private val writeQueue = ArrayDeque<BluetoothGattCharacteristic>()
+
     init {
         val manager = context.getSystemService(Context.BLUETOOTH_SERVICE) as android.bluetooth.BluetoothManager
         bluetoothAdapter = manager.adapter
@@ -26,25 +29,19 @@ class BulbController(
 
     fun testCommand(command: ByteArray) {
         if (isConnecting || bluetoothGatt != null) {
-            onLog("Already connecting or connected, waiting...")
+            onLog("Busy (already connecting/connected). Wait a few seconds and retry.")
             return
         }
 
         isConnecting = true
         pendingCommand = command
-        val macAddress = BULB_MAC_ADDRESS
+        writeQueue.clear()
 
-        onLog("Connecting to bulb at $macAddress...")
-
-        val device = bluetoothAdapter.getRemoteDevice(macAddress)
+        onLog("Connecting to $BULB_MAC_ADDRESS ...")
+        val device = bluetoothAdapter.getRemoteDevice(BULB_MAC_ADDRESS)
 
         bluetoothGatt = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            device.connectGatt(
-                context,
-                false,
-                gattCallback,
-                BluetoothDevice.TRANSPORT_LE
-            )
+            device.connectGatt(context, false, gattCallback, BluetoothDevice.TRANSPORT_LE)
         } else {
             device.connectGatt(context, false, gattCallback)
         }
@@ -56,29 +53,42 @@ class BulbController(
 
     private val gattCallback = object : BluetoothGattCallback() {
         override fun onConnectionStateChange(gatt: BluetoothGatt?, status: Int, newState: Int) {
-            super.onConnectionStateChange(gatt, status, newState)
             when (newState) {
                 android.bluetooth.BluetoothProfile.STATE_CONNECTED -> {
-                    onLog("✓ Connected to bulb, discovering services...")
+                    onLog("✓ Connected (status=$status). Discovering services...")
                     gatt?.discoverServices()
                 }
                 android.bluetooth.BluetoothProfile.STATE_DISCONNECTED -> {
-                    onLog("✗ Disconnected from bulb")
-                    isConnecting = false
-                    bluetoothGatt?.close()
-                    bluetoothGatt = null
+                    onLog("✗ Disconnected (status=$status)")
+                    cleanup()
                 }
             }
         }
 
         override fun onServicesDiscovered(gatt: BluetoothGatt?, status: Int) {
-            super.onServicesDiscovered(gatt, status)
-            if (status == BluetoothGatt.GATT_SUCCESS) {
-                onLog("✓ Services discovered")
-                gatt?.let { sendCommand(it) }
+            if (gatt == null) { cleanup(); return }
+            if (status != BluetoothGatt.GATT_SUCCESS) {
+                onLog("✗ Service discovery failed (status=$status)")
+                gatt.disconnect()
+                return
+            }
+
+            onLog("── GATT MAP (${gatt.services.size} services) ──")
+            for (service in gatt.services) {
+                onLog("SVC ${short(service.uuid)}")
+                for (c in service.characteristics) {
+                    val props = propsToString(c.properties)
+                    onLog("   CHR ${short(c.uuid)} [$props]")
+                    if (isWritable(c)) writeQueue.add(c)
+                }
+            }
+
+            onLog("── ${writeQueue.size} writable characteristic(s). Writing command... ──")
+            if (writeQueue.isEmpty()) {
+                onLog("✗ Nothing writable. Bulb likely rejects non-Wipro writes.")
+                gatt.disconnect()
             } else {
-                onLog("✗ Failed to discover services: $status")
-                gatt?.disconnect()
+                writeNext(gatt)
             }
         }
 
@@ -87,53 +97,66 @@ class BulbController(
             characteristic: BluetoothGattCharacteristic?,
             status: Int
         ) {
-            super.onCharacteristicWrite(gatt, characteristic, status)
-            if (status == BluetoothGatt.GATT_SUCCESS) {
-                onLog("✓ Command sent successfully!")
-            } else {
-                onLog("✗ Failed to send command: $status")
-            }
-            gatt?.disconnect()
+            val ok = status == BluetoothGatt.GATT_SUCCESS
+            onLog("   → write ${short(characteristic?.uuid)} : ${if (ok) "OK ✓ (watch the bulb!)" else "fail(status=$status)"}")
+            if (gatt != null) writeNext(gatt)
         }
     }
 
-    private fun sendCommand(gatt: BluetoothGatt) {
-        val services = gatt.services
-        onLog("Found ${services.size} services")
-
-        val targetUUIDs = listOf(
-            "0000e8e0-0000-1000-8000-00805f9b34fb",
-            "00005622-0000-1000-8000-00805f9b34fb",
-            "00006c00-0000-1000-8000-00805f9b34fb"
-        )
-
-        var sent = false
-        for (service in services) {
-            val serviceUUID = service.uuid.toString().lowercase()
-
-            if (targetUUIDs.any { serviceUUID.contains(it.take(8)) }) {
-                onLog("Found target service: $serviceUUID")
-
-                val characteristics = service.characteristics
-                for (char in characteristics) {
-                    val canWrite = (char.properties and BluetoothGattCharacteristic.PROPERTY_WRITE) != 0
-                    val canWriteNoResponse = (char.properties and BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE) != 0
-
-                    if (canWrite || canWriteNoResponse) {
-                        onLog("Characteristic ${char.uuid} - writable, sending...")
-                        char.value = pendingCommand
-                        gatt.writeCharacteristic(char)
-                        sent = true
-                        return
-                    }
-                }
+    private fun writeNext(gatt: BluetoothGatt) {
+        val c = writeQueue.removeFirstOrNull()
+        if (c == null) {
+            onLog("── Done. If bulb reacted, note which CHR write said OK just before. ──")
+            gatt.disconnect()
+            return
+        }
+        val cmd = pendingCommand ?: byteArrayOf(0x01)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            val writeType =
+                if ((c.properties and BluetoothGattCharacteristic.PROPERTY_WRITE) != 0)
+                    BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
+                else BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE
+            @Suppress("DEPRECATION")
+            gatt.writeCharacteristic(c, cmd, writeType)
+        } else {
+            @Suppress("DEPRECATION")
+            run {
+                c.value = cmd
+                gatt.writeCharacteristic(c)
             }
         }
+    }
 
-        if (!sent) {
-            onLog("✗ No writable characteristic found in target services")
-            gatt.disconnect()
-        }
+    private fun isWritable(c: BluetoothGattCharacteristic): Boolean {
+        val w = BluetoothGattCharacteristic.PROPERTY_WRITE
+        val wnr = BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE
+        return (c.properties and (w or wnr)) != 0
+    }
+
+    private fun propsToString(p: Int): String {
+        val parts = mutableListOf<String>()
+        if (p and BluetoothGattCharacteristic.PROPERTY_READ != 0) parts.add("R")
+        if (p and BluetoothGattCharacteristic.PROPERTY_WRITE != 0) parts.add("W")
+        if (p and BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE != 0) parts.add("Wnr")
+        if (p and BluetoothGattCharacteristic.PROPERTY_NOTIFY != 0) parts.add("N")
+        if (p and BluetoothGattCharacteristic.PROPERTY_INDICATE != 0) parts.add("I")
+        return if (parts.isEmpty()) "-" else parts.joinToString(",")
+    }
+
+    // Shorten 128-bit standard-base UUIDs to their 16-bit form for readability.
+    private fun short(uuid: UUID?): String {
+        if (uuid == null) return "null"
+        val s = uuid.toString()
+        return if (s.startsWith("0000") && s.endsWith("-0000-1000-8000-00805f9b34fb"))
+            "0x" + s.substring(4, 8).uppercase()
+        else s
+    }
+
+    private fun cleanup() {
+        isConnecting = false
+        bluetoothGatt?.close()
+        bluetoothGatt = null
+        writeQueue.clear()
     }
 
     companion object {
