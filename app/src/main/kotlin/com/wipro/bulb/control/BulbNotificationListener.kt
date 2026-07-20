@@ -5,7 +5,7 @@ import android.service.notification.StatusBarNotification
 import android.util.Log
 import android.content.Intent
 
-class NotificationListenerService : NotificationListenerService() {
+class BulbNotificationListener : NotificationListenerService() {
 
     override fun onNotificationPosted(sbn: StatusBarNotification?) {
         super.onNotificationPosted(sbn)

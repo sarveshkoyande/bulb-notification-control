@@ -21,7 +21,7 @@ class BulbControlService : Service() {
 
     private val notificationReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
-            if (intent?.action == NotificationListenerService.ACTION_NOTIFICATION_RECEIVED) {
+            if (intent?.action == BulbNotificationListener.ACTION_NOTIFICATION_RECEIVED) {
                 Log.d("BulbControlService", "Received notification broadcast, making bulb blink")
                 bulbController.connectAndBlink()
             }
@@ -35,7 +35,7 @@ class BulbControlService : Service() {
         bluetoothLeScanner = bluetoothAdapter.bluetoothLeScanner
         bulbController = BulbController(this, bluetoothAdapter)
 
-        val filter = IntentFilter(NotificationListenerService.ACTION_NOTIFICATION_RECEIVED)
+        val filter = IntentFilter(BulbNotificationListener.ACTION_NOTIFICATION_RECEIVED)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             ContextCompat.registerReceiver(
                 this,
