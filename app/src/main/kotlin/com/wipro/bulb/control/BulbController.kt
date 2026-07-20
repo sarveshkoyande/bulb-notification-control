@@ -98,17 +98,9 @@ class BulbController(
             if (result == null || !scanning) return
             val connectable = Build.VERSION.SDK_INT < Build.VERSION_CODES.O || result.isConnectable
 
-            if (!connectable) {
-                // Non-connectable advertisement: we cannot open GATT from this.
-                // Keep scanning in case the bulb flips to connectable (e.g. just after power-on).
-                if (!sawNonConnectable) {
-                    sawNonConnectable = true
-                    onLog("Seen (rssi=${result.rssi}dBm) but NON-connectable. Waiting for a connectable packet... power-cycle the bulb now.")
-                }
-                return
-            }
-
-            onLog("✓ Found CONNECTABLE bulb: rssi=${result.rssi}dBm")
+            // Even if this packet is non-connectable, try a PATIENT autoConnect: the
+            // controller will latch onto any connectable window the scan can't catch.
+            onLog("Seen bulb rssi=${result.rssi}dBm connectable=$connectable. Trying patient autoConnect (up to 40s)...")
             stopScan()
             connect(result.device)
         }
@@ -123,12 +115,20 @@ class BulbController(
     // ---- Step 2: connect ----
 
     private fun connect(device: BluetoothDevice) {
-        onLog("Connecting...")
+        // autoConnect = true: patient background connect that survives brief/directed windows.
         bluetoothGatt = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            device.connectGatt(context, false, gattCallback, BluetoothDevice.TRANSPORT_LE)
+            device.connectGatt(context, true, gattCallback, BluetoothDevice.TRANSPORT_LE)
         } else {
-            device.connectGatt(context, false, gattCallback)
+            device.connectGatt(context, true, gattCallback)
         }
+        // Give the patient connect up to 40s before giving up.
+        handler.postDelayed({
+            if (isBusy && bluetoothGatt != null) {
+                onLog("✗ autoConnect gave up after 40s — bulb never accepted a connection.")
+                bluetoothGatt?.disconnect()
+                cleanup()
+            }
+        }, 40000)
     }
 
     private val gattCallback = object : BluetoothGattCallback() {
