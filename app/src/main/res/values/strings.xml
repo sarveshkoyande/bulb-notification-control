@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Bulb Notification Control</string>
+    <string name="enable_listener">Enable Notification Listener</string>
+    <string name="status_idle">Status: Idle</string>
+    <string name="status_connected">Status: Connected to Bulb</string>
+    <string name="status_blinking">Status: Blinking Bulb</string>
+</resources>
