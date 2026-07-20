@@ -11,23 +11,26 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
 
     - name: Set up JDK 11
-      uses: actions/setup-java@v3
+      uses: actions/setup-java@v4
       with:
         java-version: '11'
         distribution: 'temurin'
         cache: 'gradle'
 
-    - name: Grant execute permission for gradlew
-      run: chmod +x gradlew || true
+    - name: Set up Android SDK
+      uses: android-actions/setup-android@v3
+      with:
+        api-level: 34
+        build-tools-version: '34.0.0'
 
-    - name: Build with Gradle
-      run: gradle build || ./gradlew build
+    - name: Grant execute permission for gradlew
+      run: chmod +x gradlew
 
     - name: Build APK
-      run: gradle assembleDebug || ./gradlew assembleDebug
+      run: ./gradlew assembleDebug
 
     - name: Upload APK
       if: success()
