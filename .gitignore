@@ -25,3 +25,6 @@ Thumbs.db
 .classpath
 .project
 .settings/
+
+# Claude
+.claude/
