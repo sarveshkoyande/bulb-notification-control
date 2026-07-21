@@ -57,11 +57,16 @@ class TuyaBeaconBroadcaster(context: Context, private val onLog: (String) -> Uni
 
     private var generation = 0
 
+    /** Same command, but connectable so Android prepends the Flags AD (like the app's packet). */
+    fun turnOnWithFlags() = send(ON, "ON+flags", connectable = true)
+    fun turnOffWithFlags() = send(OFF, "OFF+flags", connectable = true)
+
     private fun send(
         cmd17: ByteArray,
         label: String,
         durationMs: Long = 3500,
-        quiet: Boolean = false
+        quiet: Boolean = false,
+        connectable: Boolean = false
     ) {
         val adv = advertiser
         if (adv == null) {
@@ -85,7 +90,7 @@ class TuyaBeaconBroadcaster(context: Context, private val onLog: (String) -> Uni
         val settings = AdvertiseSettings.Builder()
             .setAdvertiseMode(AdvertiseSettings.ADVERTISE_MODE_LOW_LATENCY)
             .setTxPowerLevel(AdvertiseSettings.ADVERTISE_TX_POWER_HIGH)
-            .setConnectable(false)
+            .setConnectable(connectable)
             .setTimeout(0)
             .build()
 
