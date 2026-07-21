@@ -40,15 +40,38 @@ class TuyaBeaconBroadcaster(context: Context, private val onLog: (String) -> Uni
         handler.postDelayed({ turnOn() }, 8000)
     }
 
-    private fun send(cmd17: ByteArray, label: String, durationMs: Long = 3500) {
+    /**
+     * Sweep a rising sequence number. If the bulb rejects our packets because its
+     * stored counter is ahead of ours (anti-replay), one of these will cross it.
+     */
+    fun sweepOn(count: Int = 140, stepMs: Long = 150) {
+        onLog("▶ SWEEP ON: seq ${"%04x".format(seq)}..${"%04x".format(seq + count - 1)} " +
+            "(~${count * stepMs / 1000}s) — watch the bulb!")
+        for (i in 0 until count) {
+            handler.postDelayed({ send(ON, "ON", durationMs = stepMs + 80, quiet = true) }, i * stepMs)
+        }
+        handler.postDelayed({
+            stop(); onLog("SWEEP done. Next seq=${"%04x".format(seq)}")
+        }, count * stepMs + 400)
+    }
+
+    private var generation = 0
+
+    private fun send(
+        cmd17: ByteArray,
+        label: String,
+        durationMs: Long = 3500,
+        quiet: Boolean = false
+    ) {
         val adv = advertiser
         if (adv == null) {
             onLog("✗ No BLE advertiser — this phone can't broadcast BLE, or Bluetooth is off.")
             return
         }
         val s = seq++
+        val gen = ++generation
         val payload = buildPayload(cmd17, s)
-        onLog("TX $label seq=${"%04x".format(s)} adv=0201011b03${payload.toHex()}")
+        if (!quiet) onLog("TX $label seq=${"%04x".format(s)} adv=0201011b03${payload.toHex()}")
 
         val dataB = AdvertiseData.Builder()
             .setIncludeDeviceName(false)
@@ -69,7 +92,7 @@ class TuyaBeaconBroadcaster(context: Context, private val onLog: (String) -> Uni
         stop()
         val cb = object : AdvertiseCallback() {
             override fun onStartSuccess(settingsInEffect: AdvertiseSettings?) {
-                onLog("▶ broadcasting $label for ${durationMs}ms")
+                if (!quiet) onLog("▶ broadcasting $label for ${durationMs}ms")
             }
             override fun onStartFailure(errorCode: Int) {
                 onLog("✗ advertise failed err=$errorCode " +
@@ -83,7 +106,8 @@ class TuyaBeaconBroadcaster(context: Context, private val onLog: (String) -> Uni
             onLog("✗ Missing BLUETOOTH_ADVERTISE permission")
             return
         }
-        handler.postDelayed({ stop() }, durationMs)
+        // Only stop if no newer send has superseded this one.
+        handler.postDelayed({ if (gen == generation) stop() }, durationMs)
     }
 
     fun stop() {

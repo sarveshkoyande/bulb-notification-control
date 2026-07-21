@@ -38,6 +38,7 @@ class MainActivity : AppCompatActivity() {
         addButton(buttons, "Turn ON") { broadcaster.turnOn() }
         addButton(buttons, "Turn OFF") { broadcaster.turnOff() }
         addButton(buttons, "Blink (ON/OFF/ON)") { broadcaster.blink() }
+        addButton(buttons, "SWEEP ON (seq brute-force ~21s)") { broadcaster.sweepOn() }
 
         requestPermissions()
         startService(Intent(this, BulbControlService::class.java))
