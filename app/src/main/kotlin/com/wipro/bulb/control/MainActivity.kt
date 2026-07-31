@@ -41,9 +41,39 @@ class MainActivity : AppCompatActivity() {
         addButton(buttons, "Blink (ON/OFF/ON)") { broadcaster.blink() }
         addButton(buttons, "SWEEP ON (seq brute-force ~24s)") { broadcaster.sweepOn() }
 
+        addButton(buttons, "▶ Test Thing SDK auth") { testSdkAuth() }
+
         requestPermissions()
         startService(Intent(this, BulbControlService::class.java))
         logMessage("Ready. Broadcaster mode (Tuya beacon).")
+        logMessage(BulbApplication.sdkStatus)
+    }
+
+    /**
+     * Calls an authenticated SDK API to prove the AppKey/Secret/SHA256/AAR
+     * combination is accepted. "illegal client" here means one of them mismatches.
+     */
+    private fun testSdkAuth() {
+        if (!BulbApplication.sdkInitialised) {
+            logMessage("✗ SDK not initialised — ${BulbApplication.sdkStatus}")
+            return
+        }
+        logMessage("Querying SDK (fetching country list)…")
+        try {
+            com.thingclips.smart.home.sdk.ThingHomeSdk.getUserInstance()
+                .getAllCountryList(object :
+                    com.thingclips.smart.android.user.api.IGetCountryListCallback {
+                    override fun onSuccess(list: MutableList<com.thingclips.smart.android.user.bean.Country>?) {
+                        logMessage("✓ SDK AUTH OK — server returned ${list?.size ?: 0} countries")
+                    }
+
+                    override fun onError(code: String?, error: String?) {
+                        logMessage("✗ SDK auth failed: [$code] $error")
+                    }
+                })
+        } catch (t: Throwable) {
+            logMessage("✗ SDK call threw: ${t.javaClass.simpleName}: ${t.message}")
+        }
     }
 
     private fun addButton(parent: LinearLayout, label: String, onClick: () -> Unit) {
