@@ -33,7 +33,7 @@ android {
 
     defaultConfig {
         applicationId = "com.wipro.bulb.control"
-        minSdk = 21
+        minSdk = 23   // Thing App SDK requires 23+
         targetSdk = 34
         versionCode = 1
         versionName = "1.0"
@@ -97,7 +97,16 @@ android {
                 "META-INF/*.kotlin_module"
             )
         }
+        jniLibs {
+            // Thing SDK modules each bundle libc++_shared.so.
+            pickFirsts += "lib/*/libc++_shared.so"
+        }
     }
+}
+
+// Required by the Thing SDK integration guide.
+configurations.all {
+    exclude(group = "com.thingclips.smart", module = "thingsmart-modularCampAnno")
 }
 
 dependencies {
@@ -111,7 +120,7 @@ dependencies {
     // Thing (Tuya) Smart Life App SDK — per _sdk/7.8.0/thingsmart_home_sdk/dependencies.txt
     implementation("com.alibaba:fastjson:1.1.67.android")
     implementation("com.squareup.okhttp3:okhttp-urlconnection:3.14.9")
-    implementation("com.thingclips.smart:thingsmart:7.5.1")
+    implementation("com.thingclips.smart:thingsmart:7.8.0")
 
     // App-specific security algorithm library (replaces the old t_s.bmp image).
     implementation(fileTree(mapOf("dir" to "libs", "include" to listOf("*.aar"))))
