@@ -12,14 +12,15 @@ jobs:
     # Secrets are not available in step-level `if:`, so surface them as env first.
     env:
       KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
-      # The 175 KB security-algorithm AAR exceeds GitHub's 64 KB per-secret limit,
-      # so it is stored base64-split across 5 secrets and reassembled here. This
+      # The 175 KB security-algorithm AAR exceeds GitHub's 48 KB per-secret limit,
+      # so it is stored base64-split across 6 secrets and reassembled here. This
       # keeps Tuya's app-specific licensed binary out of the public repo.
       AAR_B64_0: ${{ secrets.AAR_B64_0 }}
       AAR_B64_1: ${{ secrets.AAR_B64_1 }}
       AAR_B64_2: ${{ secrets.AAR_B64_2 }}
       AAR_B64_3: ${{ secrets.AAR_B64_3 }}
       AAR_B64_4: ${{ secrets.AAR_B64_4 }}
+      AAR_B64_5: ${{ secrets.AAR_B64_5 }}
 
     steps:
     - name: Checkout
@@ -54,7 +55,7 @@ jobs:
       if: env.AAR_B64_0 != ''
       run: |
         mkdir -p app/libs
-        printf '%s' "$AAR_B64_0$AAR_B64_1$AAR_B64_2$AAR_B64_3$AAR_B64_4" \
+        printf '%s' "$AAR_B64_0$AAR_B64_1$AAR_B64_2$AAR_B64_3$AAR_B64_4$AAR_B64_5" \
           | base64 -d > app/libs/security-algorithm-1.0.0-beta.aar
         echo "AAR restored: $(stat -c%s app/libs/security-algorithm-1.0.0-beta.aar) bytes (expected 175909)"
         echo "md5: $(md5sum app/libs/security-algorithm-1.0.0-beta.aar | cut -d' ' -f1) (expected 576aeff687a5db9d59188c6d225c095c)"
