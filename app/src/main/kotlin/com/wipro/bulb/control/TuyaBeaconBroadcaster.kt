@@ -30,13 +30,14 @@ class TuyaBeaconBroadcaster(context: Context, private val onLog: (String) -> Uni
     private val advertiser: BluetoothLeAdvertiser? = adapter?.bluetoothLeAdvertiser
     private val handler = Handler(Looper.getMainLooper())
 
-    /** Start above the highest sequence seen from the app in the capture. */
-    private var seq = 0x0020
+    /** Start above the highest sequence seen from the app in the capture (0x0039). */
+    private var seq = 0x0040
     private var activeCb: AdvertiseCallback? = null
     private var generation = 0
 
     fun turnOn() = runSequence(ON, "ON")
     fun turnOff() = runSequence(OFF, "OFF")
+    fun setRed() = runSequence(RED, "RED")
 
     /** Visible blink for notifications. */
     fun blink() {
@@ -134,7 +135,8 @@ class TuyaBeaconBroadcaster(context: Context, private val onLog: (String) -> Uni
 
     private fun buildPreamble(s: Int): ByteArray {
         val p = ByteArray(25)
-        p[0] = 0x13; p[1] = 0x7e; p[2] = 0x1c; p[3] = 0x00; p[4] = 0x04
+        p[0] = 0x13; p[1] = 0x7e; p[2] = 0x1c
+        p[3] = ((EPOCH shr 8) and 0xFF).toByte(); p[4] = (EPOCH and 0xFF).toByte()
         p[5] = ((s shr 8) and 0xFF).toByte(); p[6] = (s and 0xFF).toByte()
         p[7] = 0x01; p[8] = 0x02
         System.arraycopy(PREAMBLE_BODY, 0, p, 9, 16)
@@ -143,7 +145,8 @@ class TuyaBeaconBroadcaster(context: Context, private val onLog: (String) -> Uni
 
     private fun buildCommand(cmd17: ByteArray, s: Int): ByteArray {
         val p = ByteArray(25)
-        p[0] = 0x0b; p[1] = 0x7e; p[2] = 0x1c; p[3] = 0x00; p[4] = 0x04
+        p[0] = 0x0b; p[1] = 0x7e; p[2] = 0x1c
+        p[3] = ((EPOCH shr 8) and 0xFF).toByte(); p[4] = (EPOCH and 0xFF).toByte()
         p[5] = ((s shr 8) and 0xFF).toByte(); p[6] = (s and 0xFF).toByte()
         p[7] = 0x05
         System.arraycopy(cmd17, 0, p, 8, 17)
@@ -174,10 +177,17 @@ class TuyaBeaconBroadcaster(context: Context, private val onLog: (String) -> Uni
         private const val PREAMBLE_MS = 2000L
         private const val COMMAND_MS = 3000L
 
-        // Captured constants (identical across two separate app sessions).
-        val PREAMBLE_BODY = hex("533dc51dea5fdc3e4ee6c0491f942c62")
-        val ON = hex("33e8133e2195b5e01c66e4fdca6314d00b")
-        val OFF = hex("d6b8d8714ece3182c6fb800f02770f3f79")
+        /**
+         * Captured 2026-07-31 after re-pairing the bulb. Re-binding regenerates the
+         * key, so the 16-byte AES blocks change — byte[8] (the command id) does not.
+         * If the bulb is ever removed/re-added again, these must be re-captured.
+         */
+        private const val EPOCH = 0x0008
+
+        val PREAMBLE_BODY = hex("01a3995897a060bcba1ccf674de551a7")
+        val ON = hex("33ce41efa6d7b9782770bb518e60132c10")
+        val OFF = hex("d6b1bf63503f8f85a54347f805cce4d042")
+        val RED = hex("d783f8bf0cd4dc8a70e977c7fb86546fc5")
 
         private fun hex(s: String) =
             ByteArray(s.length / 2) { s.substring(it * 2, it * 2 + 2).toInt(16).toByte() }

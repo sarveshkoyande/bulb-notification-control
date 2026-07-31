@@ -37,6 +37,7 @@ class MainActivity : AppCompatActivity() {
 
         addButton(buttons, "Turn ON  (preamble + cmd)") { broadcaster.turnOn() }
         addButton(buttons, "Turn OFF (preamble + cmd)") { broadcaster.turnOff() }
+        addButton(buttons, "Set RED") { broadcaster.setRed() }
         addButton(buttons, "Blink (ON/OFF/ON)") { broadcaster.blink() }
         addButton(buttons, "SWEEP ON (seq brute-force ~24s)") { broadcaster.sweepOn() }
 
