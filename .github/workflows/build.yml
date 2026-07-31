@@ -12,7 +12,6 @@ jobs:
     # Secrets are not available in step-level `if:`, so surface them as env first.
     env:
       KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
-      TUYA_SECURITY_IMAGE_BASE64: ${{ secrets.TUYA_SECURITY_IMAGE_BASE64 }}
 
     steps:
     - name: Checkout
@@ -41,13 +40,18 @@ jobs:
         echo "$KEYSTORE_BASE64" | base64 -d > _secrets/bulb.keystore
         echo "Keystore restored ($(stat -c%s _secrets/bulb.keystore) bytes)"
 
-    # Tuya security image, required in assets/ by the App SDK.
-    - name: Restore Tuya security image
-      if: env.TUYA_SECURITY_IMAGE_BASE64 != ''
+    # SDK 7.8.0 replaces the old t_s.bmp image with an app-specific
+    # security-algorithm AAR. Its README requires that t_s.bmp NOT be present.
+    - name: Check security-algorithm AAR
       run: |
-        mkdir -p app/src/main/assets
-        echo "$TUYA_SECURITY_IMAGE_BASE64" | base64 -d > app/src/main/assets/t_s.bmp
-        echo "Security image restored ($(stat -c%s app/src/main/assets/t_s.bmp) bytes)"
+        if ls app/libs/security-algorithm-*.aar >/dev/null 2>&1; then
+          echo "security-algorithm AAR present:"; ls -la app/libs/
+        else
+          echo "::warning::No security-algorithm AAR in app/libs — Thing SDK auth will fail at runtime (build still proceeds)."
+        fi
+        if find . -name t_s.bmp -not -path './_sdk/*' | grep -q .; then
+          echo "::error::t_s.bmp must not exist when using the security-algorithm AAR"; exit 1
+        fi
 
     - name: Build debug APK
       env:

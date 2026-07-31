@@ -38,9 +38,14 @@ android {
         versionCode = 1
         versionName = "1.0"
 
-        // Tuya App SDK credentials, injected into AndroidManifest.
-        manifestPlaceholders["TUYA_APP_KEY"] = secret("TUYA_APP_KEY")
-        manifestPlaceholders["TUYA_APP_SECRET"] = secret("TUYA_APP_SECRET")
+        // Tuya/Thing App SDK credentials -> BuildConfig, used by ThingHomeSdk.init().
+        buildConfigField("String", "TUYA_APP_KEY", "\"${secret("TUYA_APP_KEY")}\"")
+        buildConfigField("String", "TUYA_APP_SECRET", "\"${secret("TUYA_APP_SECRET")}\"")
+
+        ndk {
+            // Thing SDK ships native libs; keep the common ABIs.
+            abiFilters += listOf("armeabi-v7a", "arm64-v8a")
+        }
     }
 
     signingConfigs {
@@ -80,6 +85,18 @@ android {
 
     buildFeatures {
         viewBinding = true
+        buildConfig = true
+    }
+
+    packaging {
+        resources {
+            excludes += setOf(
+                "META-INF/DEPENDENCIES",
+                "META-INF/LICENSE*",
+                "META-INF/NOTICE*",
+                "META-INF/*.kotlin_module"
+            )
+        }
     }
 }
 
@@ -90,4 +107,12 @@ dependencies {
     implementation("androidx.constraintlayout:constraintlayout:2.1.4")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.6.2")
     implementation("androidx.lifecycle:lifecycle-viewmodel-ktx:2.6.2")
+
+    // Thing (Tuya) Smart Life App SDK — per _sdk/7.8.0/thingsmart_home_sdk/dependencies.txt
+    implementation("com.alibaba:fastjson:1.1.67.android")
+    implementation("com.squareup.okhttp3:okhttp-urlconnection:3.14.9")
+    implementation("com.thingclips.smart:thingsmart:7.5.1")
+
+    // App-specific security algorithm library (replaces the old t_s.bmp image).
+    implementation(fileTree(mapOf("dir" to "libs", "include" to listOf("*.aar"))))
 }

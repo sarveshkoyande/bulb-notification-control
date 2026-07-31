@@ -11,6 +11,9 @@ dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
+        // Thing/Tuya App SDK artifacts
+        maven { setUrl("https://maven-other.tuya.com/repository/maven-releases/") }
+        flatDir { dirs("app/libs") }
     }
 }
 

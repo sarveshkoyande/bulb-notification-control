@@ -48,3 +48,10 @@ _secrets/
 *.keystore
 *.jks
 local.signing.properties
+
+# Tuya SDK (large, licensed) — not committed
+_sdk/
+Android_SDK.zip
+
+# App-specific Tuya security algorithm AAR (licensed binary; see notes)
+app/libs/*.aar
