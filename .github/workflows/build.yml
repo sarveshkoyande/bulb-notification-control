@@ -91,9 +91,15 @@ jobs:
         STATUS=${PIPESTATUS[0]}
         if [ "$STATUS" -ne 0 ]; then
           # Surface the real cause as annotations (CI logs need auth to read).
-          # The failure block is at the END of the log; drop task-progress noise.
-          grep -v -E "^> Task |^Download|^\s*$" build.log | tail -40 \
-            | while IFS= read -r line; do echo "::error::${line:0:400}"; done
+          # Kotlin/javac errors appear mid-log as "e: ..." / "error:" lines and are
+          # far more useful than the Gradle stack trace at the end.
+          COMPILE_ERRS=$(grep -E "^e: |error: |Unresolved reference|None of the following" build.log | head -30)
+          if [ -n "$COMPILE_ERRS" ]; then
+            echo "$COMPILE_ERRS" | while IFS= read -r line; do echo "::error::${line:0:400}"; done
+          else
+            grep -v -E "^> Task |^Download|^\s*$" build.log | tail -30 \
+              | while IFS= read -r line; do echo "::error::${line:0:400}"; done
+          fi
           echo "::error::Gradle exited with status $STATUS"
         fi
         exit $STATUS
