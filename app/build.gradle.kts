@@ -1,7 +1,31 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     kotlin("android")
 }
+
+/**
+ * Signing / Tuya credentials.
+ *
+ * Locally  : read from _secrets/signing.properties (gitignored).
+ * In CI    : read from environment variables fed by GitHub Secrets.
+ *
+ * The signing key must be STABLE — the Tuya App SDK authenticates against the
+ * SHA256 of the signing certificate registered on iot.tuya.com. A per-build
+ * debug key would change every run and fail SDK auth.
+ */
+val localProps = Properties().apply {
+    val f = rootProject.file("_secrets/signing.properties")
+    if (f.exists()) f.inputStream().use { load(it) }
+}
+
+fun secret(name: String, default: String = ""): String =
+    System.getenv(name) ?: localProps.getProperty(name) ?: default
+
+val keystoreFile: File? = rootProject.file("_secrets/bulb.keystore").takeIf { it.exists() }
+val keystorePassword = secret("KEYSTORE_PASSWORD")
+val keyAlias = secret("KEY_ALIAS", "bulb")
 
 android {
     namespace = "com.wipro.bulb.control"
@@ -13,15 +37,35 @@ android {
         targetSdk = 34
         versionCode = 1
         versionName = "1.0"
+
+        // Tuya App SDK credentials, injected into AndroidManifest.
+        manifestPlaceholders["TUYA_APP_KEY"] = secret("TUYA_APP_KEY")
+        manifestPlaceholders["TUYA_APP_SECRET"] = secret("TUYA_APP_SECRET")
+    }
+
+    signingConfigs {
+        if (keystoreFile != null && keystorePassword.isNotEmpty()) {
+            create("app") {
+                storeFile = keystoreFile
+                storePassword = keystorePassword
+                this.keyAlias = keyAlias
+                keyPassword = keystorePassword
+            }
+        }
     }
 
     buildTypes {
+        val appSigning = signingConfigs.findByName("app")
+        debug {
+            if (appSigning != null) signingConfig = appSigning
+        }
         release {
             isMinifyEnabled = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+            if (appSigning != null) signingConfig = appSigning
         }
     }
 

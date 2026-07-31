@@ -37,6 +37,10 @@
             android:name=".BulbControlService"
             android:exported="false" />
 
+        <!-- Tuya App SDK credentials, injected at build time from secrets. -->
+        <meta-data android:name="TUYA_SMART_APPKEY" android:value="${TUYA_APP_KEY}" />
+        <meta-data android:name="TUYA_SMART_SECRET" android:value="${TUYA_APP_SECRET}" />
+
     </application>
 
 </manifest>

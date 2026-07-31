@@ -42,3 +42,9 @@ tuya-raw.json
 snapshot.json
 
 _capture2/
+
+# Signing keystore + local secrets — never commit
+_secrets/
+*.keystore
+*.jks
+local.signing.properties
