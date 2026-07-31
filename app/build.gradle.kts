@@ -25,7 +25,9 @@ fun secret(name: String, default: String = ""): String =
 
 val keystoreFile: File? = rootProject.file("_secrets/bulb.keystore").takeIf { it.exists() }
 val keystorePassword = secret("KEYSTORE_PASSWORD")
-val keyAlias = secret("KEY_ALIAS", "bulb")
+// NOTE: must not be named `keyAlias` — inside signingConfigs{} the SigningConfig
+// receiver shadows it, so `keyAlias = keyAlias` would assign the config's own null.
+val signingKeyAlias = secret("KEY_ALIAS", "bulb")
 
 android {
     namespace = "com.wipro.bulb.control"
@@ -53,7 +55,7 @@ android {
             create("app") {
                 storeFile = keystoreFile
                 storePassword = keystorePassword
-                this.keyAlias = keyAlias
+                keyAlias = signingKeyAlias
                 keyPassword = keystorePassword
             }
         }
