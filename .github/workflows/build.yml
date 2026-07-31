@@ -56,9 +56,16 @@ jobs:
       run: |
         mkdir -p app/libs
         printf '%s' "$AAR_B64_0$AAR_B64_1$AAR_B64_2$AAR_B64_3$AAR_B64_4$AAR_B64_5" \
-          | base64 -d > app/libs/security-algorithm-1.0.0-beta.aar
-        echo "AAR restored: $(stat -c%s app/libs/security-algorithm-1.0.0-beta.aar) bytes (expected 175909)"
-        echo "md5: $(md5sum app/libs/security-algorithm-1.0.0-beta.aar | cut -d' ' -f1) (expected 576aeff687a5db9d59188c6d225c095c)"
+          | tr -d '\r\n \t' | base64 -d > app/libs/security-algorithm-1.0.0-beta.aar || true
+        SZ=$(stat -c%s app/libs/security-algorithm-1.0.0-beta.aar 2>/dev/null || echo 0)
+        MD5=$(md5sum app/libs/security-algorithm-1.0.0-beta.aar 2>/dev/null | cut -d' ' -f1)
+        echo "AAR restored: $SZ bytes, md5=$MD5"
+        if [ "$MD5" != "576aeff687a5db9d59188c6d225c095c" ]; then
+          echo "::error::AAR CORRUPT — got $SZ bytes md5=$MD5, expected 175909 bytes md5=576aeff687a5db9d59188c6d225c095c. A secret part is truncated or has stray characters."
+          rm -f app/libs/security-algorithm-1.0.0-beta.aar
+        else
+          echo "AAR verified OK"
+        fi
 
     - name: Check SDK security files
       run: |
@@ -78,7 +85,18 @@ jobs:
         KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
         TUYA_APP_KEY: ${{ secrets.TUYA_APP_KEY }}
         TUYA_APP_SECRET: ${{ secrets.TUYA_APP_SECRET }}
-      run: gradle assembleDebug --no-daemon --stacktrace
+      run: |
+        set +e
+        gradle assembleDebug --no-daemon --stacktrace 2>&1 | tee build.log
+        STATUS=${PIPESTATUS[0]}
+        if [ "$STATUS" -ne 0 ]; then
+          # Surface the real cause as annotations (CI logs need auth to read).
+          grep -E "FAILURE:|Execution failed|error:|Caused by:|Duplicate class|^> |Could not (resolve|find)|AAPT|Manifest merger" build.log \
+            | grep -v "^\s*$" | head -25 \
+            | while IFS= read -r line; do echo "::error::${line:0:400}"; done
+          echo "::error::Gradle exited with status $STATUS"
+        fi
+        exit $STATUS
 
     - name: Show signing certificate fingerprint
       run: |
