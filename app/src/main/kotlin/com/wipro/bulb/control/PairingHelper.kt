@@ -9,7 +9,7 @@ import com.thingclips.smart.activator.core.kit.bean.ThingDeviceActiveErrorBean
 import com.thingclips.smart.activator.core.kit.bean.ThingDeviceActiveLimitBean
 import com.thingclips.smart.activator.core.kit.builder.ThingDeviceActiveBuilder
 import com.thingclips.smart.activator.core.kit.callback.ThingActivatorScanCallback
-import com.thingclips.smart.activator.core.kit.listener.IThingDeviceActiveListener
+import com.thingclips.smart.activator.core.kit.listener.IThingMeshDeviceActiveListener
 import com.thingclips.smart.android.ble.api.ScanType
 import com.thingclips.smart.home.sdk.ThingHomeSdk
 import com.thingclips.smart.home.sdk.bean.HomeBean
@@ -115,7 +115,10 @@ class PairingHelper(private val activity: Activity, private val onLog: (String) 
                 setMeshSearchBeans(mutableListOf())
                 setLightningSearchBeans(mutableListOf())
                 setDevList(mutableListOf())
-                listener = object : IThingDeviceActiveListener {
+                // The SDK internally casts the listener to IThingMeshDeviceActiveListener
+                // even for a single BEACON device — it extends IThingDeviceActiveListener
+                // and adds onFinish(). A plain IThingDeviceActiveListener CCEs at runtime.
+                listener = object : IThingMeshDeviceActiveListener {
                     override fun onFind(devId: String) {
                         onLog("… found devId=$devId")
                     }
@@ -131,6 +134,9 @@ class PairingHelper(private val activity: Activity, private val onLog: (String) 
                     }
                     override fun onActiveLimited(limitBean: ThingDeviceActiveLimitBean) {
                         onLog("✗ Pairing limited: $limitBean")
+                    }
+                    override fun onFinish() {
+                        onLog("… pairing sequence finished")
                     }
                 }
             })
