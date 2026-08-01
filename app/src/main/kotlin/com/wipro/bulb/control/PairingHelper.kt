@@ -110,15 +110,20 @@ class PairingHelper(private val activity: Activity, private val onLog: (String) 
                 setActivatorScanDeviceBean(deviceBean)
                 timeOut = 60
                 relationId = currentHomeId
-                // The SDK's internal startActive() null-checks these lists even for a
-                // BEACON single-device pair that doesn't use mesh — empty, not null.
-                setMeshSearchBeans(mutableListOf())
+                // BEACON devices are activated through the same batch/"mesh" code path
+                // internally (confirmed by the listener needing IThingMeshDeviceActiveListener,
+                // and IThingBeaconManager's group-oriented API). Leaving this list empty made
+                // the batch loop iterate zero devices and fire onFinish() with nothing done —
+                // the bulb never actually got processed. Put the device IN the batch.
+                setMeshSearchBeans(mutableListOf(deviceBean))
                 setLightningSearchBeans(mutableListOf())
                 setDevList(mutableListOf())
                 // The SDK internally casts the listener to IThingMeshDeviceActiveListener
                 // even for a single BEACON device — it extends IThingDeviceActiveListener
                 // and adds onFinish(). A plain IThingDeviceActiveListener CCEs at runtime.
                 listener = object : IThingMeshDeviceActiveListener {
+                    var succeeded = false
+
                     override fun onFind(devId: String) {
                         onLog("… found devId=$devId")
                     }
@@ -126,6 +131,7 @@ class PairingHelper(private val activity: Activity, private val onLog: (String) 
                         onLog("… bound devId=$devId")
                     }
                     override fun onActiveSuccess(deviceBean: DeviceBean) {
+                        succeeded = true
                         onLog("✓ PAIRED — devId=${deviceBean.devId} name=${deviceBean.name}")
                         onLog("Save this devId to control the bulb via publishDps.")
                     }
@@ -136,7 +142,10 @@ class PairingHelper(private val activity: Activity, private val onLog: (String) 
                         onLog("✗ Pairing limited: $limitBean")
                     }
                     override fun onFinish() {
-                        onLog("… pairing sequence finished")
+                        onLog(
+                            if (succeeded) "… pairing sequence finished (after success)"
+                            else "✗ pairing sequence finished WITHOUT any success/error — device was not processed"
+                        )
                     }
                 }
             })
