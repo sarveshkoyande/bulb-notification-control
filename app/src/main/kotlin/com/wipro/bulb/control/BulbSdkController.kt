@@ -9,20 +9,23 @@ import com.thingclips.smart.sdk.api.IResultCallback
 /**
  * Real device control via the Thing SDK, using the devId obtained from pairing.
  *
- * DP map (from the device's Tuya cloud spec — DP1/2/3/4/7/34 confirmed directly;
- * DP5=colour_data_v2 is Tuya's standard convention for rgbcw bulbs, not directly
- * confirmed from the (truncated) spec dump, so verify if colour control misbehaves):
- *   1  switch_led      bool
- *   2  work_mode        enum: white | colour | scene | music
- *   3  bright_value_v2  int 10-1000
- *   4  temp_value_v2    int 0-1000
- *   5  colour_data_v2   string "hhhhssssvvvv" (4 hex digits each: H 0-360, S 0-1000, V 0-1000)
+ * DP map — confirmed directly from this device's actual schema (queryDeviceInfo()),
+ * NOT the assumed "_v2" convention that turned out wrong:
+ *   1  switch_led    bool
+ *   2  work_mode     enum: white | colour | scene | music
+ *   3  bright_value  int 10-1000
+ *   4  temp_value    int 0-1000
+ *   7  countdown     int 0-86400 (seconds)
+ *   ?  colour_data_raw  type "raw" (base64), maxlen 128 — id discovered at runtime,
+ *      NOT 5 as first assumed. DP5 doesn't exist on this device at all; every
+ *      publishDps({"5":...}) call failed outright with "no dps or dps is invalid".
+ *      Colour appeared to "work" for red only because switching work_mode to
+ *      "colour" shows the bulb's last-cached colour, coincidentally red — the
+ *      actual colour writes were silently erroring the whole time.
  *
- * IMPORTANT quirk discovered empirically: switching work_mode and setting
- * colour_data_v2 in the SAME publishDps call is unreliable — only the first
- * colour after a mode switch (which happened to be red/H0) actually applied;
- * later hues were ignored. Sending the mode switch and the colour value as
- * two SEPARATE sequential calls (with a short gap) fixes it.
+ * Also confirmed empirically: switching work_mode and setting the colour DP in
+ * the SAME publishDps call is unreliable; send them as two SEPARATE sequential
+ * calls with a short gap (see ensureMode).
  */
 class BulbSdkController(context: Context, private val onLog: (String) -> Unit) {
 
@@ -36,16 +39,38 @@ class BulbSdkController(context: Context, private val onLog: (String) -> Unit) {
     /** Tracks last mode sent so we only switch (and pay the settle delay) when needed. */
     private var lastMode: String? = null
 
+    /** Discovered from the real device schema via queryDeviceInfo() — DP5 does not exist
+     *  on this device; the real colour DP has a different id and is type "raw", which
+     *  requires base64-encoded bytes rather than a plain hex string. */
+    private var colourDpId: Int?
+        get() = prefs.getInt(KEY_COLOUR_DP, -1).takeIf { it > 0 }
+        set(value) { prefs.edit().putInt(KEY_COLOUR_DP, value ?: -1).apply() }
+    private var colourDpIsRaw: Boolean
+        get() = prefs.getBoolean(KEY_COLOUR_DP_RAW, true)
+        set(value) { prefs.edit().putBoolean(KEY_COLOUR_DP_RAW, value).apply() }
+
     fun turnOn() = publish(mapOf("1" to true))
     fun turnOff() = publish(mapOf("1" to false))
 
     /** hue 0-360, sat 0-1000, value(brightness) 0-1000 */
     fun setColor(hue: Int, sat: Int, value: Int) {
+        val dpId = colourDpId
+        if (dpId == null) {
+            onLog("✗ Colour DP unknown — tap 'Query device schema' once first")
+            return
+        }
         val hex = "%04x%04x%04x".format(
             hue.coerceIn(0, 360), sat.coerceIn(0, 1000), value.coerceIn(0, 1000)
         )
+        // RAW-type Tuya colour DPs commonly carry the same ASCII hex string, just
+        // base64-wrapped for transport (confirmed pattern across Tuya raw DPs).
+        val dpValue: Any = if (colourDpIsRaw) {
+            android.util.Base64.encodeToString(hex.toByteArray(Charsets.US_ASCII), android.util.Base64.NO_WRAP)
+        } else {
+            hex
+        }
         ensureMode("colour") {
-            publish(mapOf("5" to hex))
+            publish(mapOf(dpId.toString() to dpValue))
         }
     }
 
@@ -86,8 +111,22 @@ class BulbSdkController(context: Context, private val onLog: (String) -> Unit) {
                 onLog("✗ getDeviceBean returned null for $id")
                 return
             }
-            onLog("schema: ${bean.schema}")
             onLog("current dps: ${bean.dps}")
+
+            val schema = org.json.JSONArray(bean.schema)
+            for (i in 0 until schema.length()) {
+                val dp = schema.getJSONObject(i)
+                val code = dp.optString("code")
+                if (code.contains("colour", true) || code.contains("color", true)) {
+                    val prop = dp.optJSONObject("property")
+                    val dpId = dp.optInt("id")
+                    val type = prop?.optString("type")
+                    onLog("★ COLOUR DP FOUND: code=$code id=$dpId type=$type property=$prop")
+                    colourDpId = dpId
+                    colourDpIsRaw = (type == "raw")
+                }
+            }
+            if (colourDpId == null) onLog("✗ No dp with 'colour'/'color' in its code found in schema")
         }.onFailure {
             onLog("✗ queryDeviceInfo failed: ${it.javaClass.simpleName}: ${it.message}")
         }
@@ -114,6 +153,8 @@ class BulbSdkController(context: Context, private val onLog: (String) -> Unit) {
 
     companion object {
         private const val KEY_DEV_ID = "devId"
+        private const val KEY_COLOUR_DP = "colourDpId"
+        private const val KEY_COLOUR_DP_RAW = "colourDpIsRaw"
         private const val MODE_SWITCH_DELAY_MS = 400L
     }
 }

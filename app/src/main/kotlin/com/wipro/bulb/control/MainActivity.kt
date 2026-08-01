@@ -52,6 +52,7 @@ class MainActivity : AppCompatActivity() {
         pairing = PairingHelper(this, { logMessage(it) }) { devId ->
             sdkControl.devId = devId
             logMessage("Stored devId for control: $devId")
+            sdkControl.queryDeviceInfo() // discover the real colour DP id immediately
         }
 
         enableListenerBtn.setOnClickListener {
