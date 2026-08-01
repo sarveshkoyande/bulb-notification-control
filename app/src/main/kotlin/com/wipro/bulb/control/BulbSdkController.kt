@@ -21,12 +21,15 @@ import com.thingclips.smart.sdk.api.IResultCallback
  *      call failed outright with "no dps or dps is invalid" — colour "worked"
  *      for red only because switching work_mode to "colour" shows the bulb's
  *      last-cached colour, coincidentally red).
- *      Payload: the same 12-char hex string as colour_data_v2 — H (4 hex
- *      digits, 0-360), S (4 hex digits, 0-1000), V (4 hex digits, 0-1000) —
- *      sent as plain hex text, NOT base64 (base64 was rejected outright with
- *      error 11001, "data sent in incorrect format"). An earlier attempt at a
- *      compact 4-byte layout (S/V truncated to 0-255) sent, applied without
- *      error, but broke saturation past a threshold from the precision loss.
+ *      Payload: CONFIRMED-WORKING 4-byte layout [H_hi, H_lo, S(0-255), V(0-255)]
+ *      sent as an 8-char hex string, NOT base64 (base64 was rejected outright
+ *      with error 11001, "data sent in incorrect format"). User-verified: colour
+ *      changes correctly across most of the range; saturation misbehaves (goes
+ *      white) above ~396/1000 — a real but narrower bug, not yet root-caused.
+ *      A "fix" attempt switching to a 6-byte/12-hex-char layout (matching Tuya's
+ *      generic colour_data STRING-type docs) broke colour control completely —
+ *      that doc description was never confirmed for this specific RAW dp. Do
+ *      not change this encoding again without an explicit user-confirmed test.
  *
  * Also confirmed empirically: switching work_mode and setting the colour DP in
  * the SAME publishDps call is unreliable; send them as two SEPARATE sequential
@@ -68,14 +71,19 @@ class BulbSdkController(context: Context, private val onLog: (String) -> Unit) {
         val s = sat.coerceIn(0, 1000)
         val v = value.coerceIn(0, 1000)
 
-        // Per Tuya's own docs, the RAW colour_data byte layout mirrors the string
-        // format exactly: H (2 bytes, 0-360), S (2 bytes, 0-1000), V (2 bytes, 0-1000)
-        // — 6 bytes, i.e. the same 12-char hex string used for colour_data_v2. An
-        // earlier 4-byte attempt (H + 1-byte S/V truncated to 0-255) lost precision
-        // and made saturation misbehave past a threshold once the device's parser
-        // read past the truncated byte boundary. Raw-type DPs are still transported
-        // as a hex string, not base64 (that was the real fix for error 11001).
-        val dpValue = "%04x%04x%04x".format(h, s, v)
+        // REVERTED to the 4-byte layout: this was the CONFIRMED-WORKING format
+        // (user verified colour genuinely changed across the range, with only a
+        // saturation ceiling issue above ~396). A later "fix" switched to a 6-byte
+        // layout based on Tuya's generic colour_data (non-raw) doc description,
+        // which was NOT verified for this specific raw DP and broke colour control
+        // entirely (confirmed broken even via the independent screen-sync path,
+        // which rules out a slider/UI-level cause). Do not change this again
+        // without a user-confirmed test — see BulbSdkController's class doc.
+        val s255 = (s * 255 / 1000)
+        val v255 = (v * 255 / 1000)
+        val dpValue = "%02x%02x%02x%02x".format(
+            (h shr 8) and 0xFF, h and 0xFF, s255, v255
+        )
         ensureMode("colour") {
             publish(mapOf(dpId.toString() to dpValue))
         }
