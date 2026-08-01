@@ -71,18 +71,19 @@ class BulbSdkController(context: Context, private val onLog: (String) -> Unit) {
         val s = sat.coerceIn(0, 1000)
         val v = value.coerceIn(0, 1000)
 
-        // REVERTED to the 4-byte layout: this was the CONFIRMED-WORKING format
-        // (user verified colour genuinely changed across the range, with only a
-        // saturation ceiling issue above ~396). A later "fix" switched to a 6-byte
-        // layout based on Tuya's generic colour_data (non-raw) doc description,
-        // which was NOT verified for this specific raw DP and broke colour control
-        // entirely (confirmed broken even via the independent screen-sync path,
-        // which rules out a slider/UI-level cause). Do not change this again
-        // without a user-confirmed test — see BulbSdkController's class doc.
-        val s255 = (s * 255 / 1000)
-        val v255 = (v * 255 / 1000)
+        // 4-byte layout [H_hi,H_lo,S,V] is CONFIRMED-WORKING overall — do not
+        // change the structure again without a user-confirmed test.
+        //
+        // HYPOTHESIS (pending test): S/V bytes are 0-100 (percentage), not 0-255.
+        // Evidence: with the old 0-255 scaling (s*255/1000), the byte value crosses
+        // 100 right around slider position 1000*100/255 ≈ 392 — matching almost
+        // exactly where the user observed saturation "going white" (~396). If a
+        // 0-100-percentage firmware receives a byte >100, it likely falls back to
+        // some default/invalid state, which looks exactly like this symptom.
+        val s100 = (s * 100 / 1000).coerceIn(0, 100)
+        val v100 = (v * 100 / 1000).coerceIn(0, 100)
         val dpValue = "%02x%02x%02x%02x".format(
-            (h shr 8) and 0xFF, h and 0xFF, s255, v255
+            (h shr 8) and 0xFF, h and 0xFF, s100, v100
         )
         ensureMode("colour") {
             publish(mapOf(dpId.toString() to dpValue))
