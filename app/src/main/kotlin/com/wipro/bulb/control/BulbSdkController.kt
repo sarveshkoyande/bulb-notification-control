@@ -16,12 +16,15 @@ import com.thingclips.smart.sdk.api.IResultCallback
  *   3  bright_value  int 10-1000
  *   4  temp_value    int 0-1000
  *   7  countdown     int 0-86400 (seconds)
- *   ?  colour_data_raw  type "raw" (base64), maxlen 128 — id discovered at runtime,
- *      NOT 5 as first assumed. DP5 doesn't exist on this device at all; every
- *      publishDps({"5":...}) call failed outright with "no dps or dps is invalid".
- *      Colour appeared to "work" for red only because switching work_mode to
- *      "colour" shows the bulb's last-cached colour, coincidentally red — the
- *      actual colour writes were silently erroring the whole time.
+ *   11 colour_data_raw  type "raw", maxlen 128 — confirmed via queryDeviceInfo()
+ *      (DP5 doesn't exist on this device at all; every publishDps({"5":...})
+ *      call failed outright with "no dps or dps is invalid" — colour "worked"
+ *      for red only because switching work_mode to "colour" shows the bulb's
+ *      last-cached colour, coincidentally red).
+ *      Payload is the LEGACY Tuya binary format (distinct from the newer
+ *      colour_data_v2 12-char hex STRING): 4 raw bytes [H_hi, H_lo, S, V]
+ *      where H is big-endian uint16 (0-360) and S/V are uint8 (0-255),
+ *      base64-encoded for transport.
  *
  * Also confirmed empirically: switching work_mode and setting the colour DP in
  * the SAME publishDps call is unreliable; send them as two SEPARATE sequential
@@ -59,15 +62,26 @@ class BulbSdkController(context: Context, private val onLog: (String) -> Unit) {
             onLog("✗ Colour DP unknown — tap 'Query device schema' once first")
             return
         }
-        val hex = "%04x%04x%04x".format(
-            hue.coerceIn(0, 360), sat.coerceIn(0, 1000), value.coerceIn(0, 1000)
-        )
-        // RAW-type Tuya colour DPs commonly carry the same ASCII hex string, just
-        // base64-wrapped for transport (confirmed pattern across Tuya raw DPs).
+        val h = hue.coerceIn(0, 360)
+        val s = sat.coerceIn(0, 1000)
+        val v = value.coerceIn(0, 1000)
+
         val dpValue: Any = if (colourDpIsRaw) {
-            android.util.Base64.encodeToString(hex.toByteArray(Charsets.US_ASCII), android.util.Base64.NO_WRAP)
+            // colour_data_raw (as opposed to the newer colour_data_v2 hex-string DP) is
+            // Tuya's legacy binary format: 4 bytes [H_hi, H_lo, S(0-255), V(0-255)],
+            // base64-encoded for transport. Different device, different protocol —
+            // NOT the same 12-char ASCII hex string used by _v2 DPs.
+            val s255 = (s * 255 / 1000)
+            val v255 = (v * 255 / 1000)
+            val bytes = byteArrayOf(
+                ((h shr 8) and 0xFF).toByte(),
+                (h and 0xFF).toByte(),
+                s255.toByte(),
+                v255.toByte()
+            )
+            android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)
         } else {
-            hex
+            "%04x%04x%04x".format(h, s, v)
         }
         ensureMode("colour") {
             publish(mapOf(dpId.toString() to dpValue))
