@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Color
+import android.media.projection.MediaProjectionManager
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
@@ -16,6 +17,7 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.SeekBar
 import android.widget.TextView
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
@@ -36,6 +38,24 @@ class MainActivity : AppCompatActivity() {
     private lateinit var passwordField: EditText
     private lateinit var pairing: PairingHelper
     private lateinit var sdkControl: BulbSdkController
+    private var screenSyncRunning = false
+
+    private val projectionLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == RESULT_OK && result.data != null) {
+            val intent = Intent(this, ScreenSyncService::class.java).apply {
+                putExtra(ScreenSyncService.EXTRA_RESULT_CODE, result.resultCode)
+                putExtra(ScreenSyncService.EXTRA_RESULT_DATA, result.data)
+            }
+            ContextCompat.startForegroundService(this, intent)
+            screenSyncRunning = true
+            findViewById<Button>(R.id.screenSyncBtn).text = "Stop Screen Colour Sync"
+            logMessage("▶ Screen colour sync started")
+        } else {
+            logMessage("✗ Screen capture permission denied")
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -108,7 +128,20 @@ class MainActivity : AppCompatActivity() {
         val modeWhiteBtn = findViewById<Button>(R.id.modeWhiteBtn)
         val modeColourBtn = findViewById<Button>(R.id.modeColourBtn)
         val powerToggleBtn = findViewById<Button>(R.id.powerToggleBtn)
+        val screenSyncBtn = findViewById<Button>(R.id.screenSyncBtn)
         val colorPreview = findViewById<View>(R.id.colorPreview)
+
+        screenSyncBtn.setOnClickListener {
+            if (screenSyncRunning) {
+                stopService(Intent(this, ScreenSyncService::class.java))
+                screenSyncRunning = false
+                screenSyncBtn.text = "Start Screen Colour Sync"
+                logMessage("■ Screen colour sync stopped")
+            } else {
+                val mpm = getSystemService(MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+                projectionLauncher.launch(mpm.createScreenCaptureIntent())
+            }
+        }
 
         val colourGroup = findViewById<LinearLayout>(R.id.colourControlsGroup)
         val whiteGroup = findViewById<LinearLayout>(R.id.whiteControlsGroup)
@@ -327,6 +360,9 @@ class MainActivity : AppCompatActivity() {
             perms.add(Manifest.permission.BLUETOOTH_ADVERTISE)
             perms.add(Manifest.permission.BLUETOOTH_SCAN)
             perms.add(Manifest.permission.BLUETOOTH_CONNECT)
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            perms.add(Manifest.permission.POST_NOTIFICATIONS)
         }
         perms.add(Manifest.permission.ACCESS_FINE_LOCATION)
         val need = perms.filter {
