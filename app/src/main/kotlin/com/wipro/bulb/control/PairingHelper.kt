@@ -23,7 +23,11 @@ import com.thingclips.smart.sdk.bean.DeviceBean
  * javap and cross-checked against Tuya's official BizSdkSample
  * (DeviceConfigBleActivity.kt) — not guessed from the older com.tuya.smart docs.
  */
-class PairingHelper(private val activity: Activity, private val onLog: (String) -> Unit) {
+class PairingHelper(
+    private val activity: Activity,
+    private val onLog: (String) -> Unit,
+    private val onPaired: (devId: String) -> Unit = {}
+) {
 
     private var scanKey: ThingActivatorScanKey? = null
     var currentHomeId: Long = 0L
@@ -133,7 +137,7 @@ class PairingHelper(private val activity: Activity, private val onLog: (String) 
                     override fun onActiveSuccess(deviceBean: DeviceBean) {
                         succeeded = true
                         onLog("✓ PAIRED — devId=${deviceBean.devId} name=${deviceBean.name}")
-                        onLog("Save this devId to control the bulb via publishDps.")
+                        onPaired(deviceBean.devId)
                     }
                     override fun onActiveError(errorBean: ThingDeviceActiveErrorBean) {
                         onLog("✗ Pairing error: $errorBean")

@@ -32,6 +32,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var codeField: EditText
     private lateinit var passwordField: EditText
     private lateinit var pairing: PairingHelper
+    private lateinit var sdkControl: BulbSdkController
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -42,7 +43,11 @@ class MainActivity : AppCompatActivity() {
         val buttons = findViewById<LinearLayout>(R.id.testButtonsContainer)
 
         broadcaster = TuyaBeaconBroadcaster(this) { logMessage(it) }
-        pairing = PairingHelper(this) { logMessage(it) }
+        sdkControl = BulbSdkController(this) { logMessage(it) }
+        pairing = PairingHelper(this, { logMessage(it) }) { devId ->
+            sdkControl.devId = devId
+            logMessage("Stored devId for control: $devId")
+        }
 
         enableListenerBtn.setOnClickListener {
             startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
@@ -71,10 +76,21 @@ class MainActivity : AppCompatActivity() {
         addButton(buttons, "4. Create Home") { if (sdkReady()) pairing.createHome("Bulb Home") }
         addButton(buttons, "5. Search & Pair Bulb (60s)") { if (sdkReady()) pairing.searchAndPairBulb() }
 
+        // ---- Real control via SDK (works once paired — arbitrary colour!) ----
+        addLabel(buttons, "— SDK control (real, arbitrary colour) —")
+        addButton(buttons, "SDK: Turn ON") { sdkControl.turnOn() }
+        addButton(buttons, "SDK: Turn OFF") { sdkControl.turnOff() }
+        addButton(buttons, "SDK: Red") { sdkControl.setColor(0, 1000, 1000) }
+        addButton(buttons, "SDK: Green") { sdkControl.setColor(120, 1000, 1000) }
+        addButton(buttons, "SDK: Blue") { sdkControl.setColor(240, 1000, 1000) }
+        addButton(buttons, "SDK: Purple") { sdkControl.setColor(280, 1000, 1000) }
+        addButton(buttons, "SDK: White 50%") { sdkControl.setBrightness(500) }
+
         requestPermissions()
         startService(Intent(this, BulbControlService::class.java))
         logMessage("Ready. Broadcaster mode (Tuya beacon).")
         logMessage(BulbApplication.sdkStatus)
+        sdkControl.devId?.let { logMessage("Previously paired devId: $it") }
     }
 
     // ---------- Thing SDK ----------
