@@ -24,7 +24,9 @@ import com.thingclips.smart.sdk.api.IResultCallback
  *      Payload is the LEGACY Tuya binary format (distinct from the newer
  *      colour_data_v2 12-char hex STRING): 4 raw bytes [H_hi, H_lo, S, V]
  *      where H is big-endian uint16 (0-360) and S/V are uint8 (0-255),
- *      base64-encoded for transport.
+ *      sent as an 8-character HEX STRING (Tuya's Raw-type DP convention —
+ *      base64 was tried first and rejected outright with error 11001,
+ *      "data sent in incorrect format", regardless of content).
  *
  * Also confirmed empirically: switching work_mode and setting the colour DP in
  * the SAME publishDps call is unreliable; send them as two SEPARATE sequential
@@ -68,18 +70,16 @@ class BulbSdkController(context: Context, private val onLog: (String) -> Unit) {
 
         val dpValue: Any = if (colourDpIsRaw) {
             // colour_data_raw (as opposed to the newer colour_data_v2 hex-string DP) is
-            // Tuya's legacy binary format: 4 bytes [H_hi, H_lo, S(0-255), V(0-255)],
-            // base64-encoded for transport. Different device, different protocol —
-            // NOT the same 12-char ASCII hex string used by _v2 DPs.
+            // Tuya's legacy binary format: 4 bytes [H_hi, H_lo, S(0-255), V(0-255)].
+            // Per Tuya's own Android SDK docs: a Raw-type DP value is sent as a plain
+            // HEX STRING with an even digit count (e.g. {"105":"0110"}) — NOT base64.
+            // Sending base64 text made the cloud reject every call with error 11001
+            // ("data sent in incorrect format") regardless of the actual colour values.
             val s255 = (s * 255 / 1000)
             val v255 = (v * 255 / 1000)
-            val bytes = byteArrayOf(
-                ((h shr 8) and 0xFF).toByte(),
-                (h and 0xFF).toByte(),
-                s255.toByte(),
-                v255.toByte()
+            "%02x%02x%02x%02x".format(
+                (h shr 8) and 0xFF, h and 0xFF, s255, v255
             )
-            android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)
         } else {
             "%04x%04x%04x".format(h, s, v)
         }
