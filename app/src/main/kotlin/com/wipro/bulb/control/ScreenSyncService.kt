@@ -23,12 +23,9 @@ import androidx.core.app.NotificationCompat
 
 /**
  * Foreground service that captures this phone's own screen (via MediaProjection),
- * samples the centre pixel a few times a second, and drives the bulb's colour to
- * match — a phone-side "ambient light" mode.
- *
- * Downscales the virtual display to a small buffer (the system does the scaling),
- * so the sampled "centre pixel" is really an average of the screen's centre region,
- * not a single raw pixel — desirable for a smoother, less flickery result.
+ * samples the exact centre pixel of the REAL screen resolution (no downscaling —
+ * a true single pixel, not a blended average), and drives the bulb's colour to
+ * match — a phone-side "ambient light" mode. Sends at most 4 updates/sec.
  */
 class ScreenSyncService : Service() {
 
@@ -39,7 +36,6 @@ class ScreenSyncService : Service() {
     private lateinit var bgHandler: Handler
 
     private lateinit var sdkControl: BulbSdkController
-    private var lastSentHsv: FloatArray? = null
     private var lastSentAt = 0L
 
     override fun onCreate() {
@@ -77,20 +73,28 @@ class ScreenSyncService : Service() {
         return START_STICKY
     }
 
+    private var captureWidth = 0
+    private var captureHeight = 0
+
     private fun startCapture(projection: MediaProjection) {
         val metrics = DisplayMetrics()
         @Suppress("DEPRECATION")
         (getSystemService(WINDOW_SERVICE) as android.view.WindowManager)
             .defaultDisplay.getMetrics(metrics)
 
+        // Full real screen resolution — no downscaling — so the sampled point is
+        // a genuine single pixel from the actual display, not a blended average.
+        captureWidth = metrics.widthPixels
+        captureHeight = metrics.heightPixels
+
         val reader = ImageReader.newInstance(
-            CAPTURE_SIZE, CAPTURE_SIZE, PixelFormat.RGBA_8888, 2
+            captureWidth, captureHeight, PixelFormat.RGBA_8888, 2
         )
         imageReader = reader
 
         virtualDisplay = projection.createVirtualDisplay(
             "BulbScreenSync",
-            CAPTURE_SIZE, CAPTURE_SIZE, metrics.densityDpi,
+            captureWidth, captureHeight, metrics.densityDpi,
             DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
             reader.surface, null, bgHandler
         )
@@ -107,8 +111,9 @@ class ScreenSyncService : Service() {
         val rowStride = plane.rowStride
         val pixelStride = plane.pixelStride
 
-        val cx = CAPTURE_SIZE / 2
-        val cy = CAPTURE_SIZE / 2
+        // Exact centre pixel of the real screen — a true single pixel, not an average.
+        val cx = captureWidth / 2
+        val cy = captureHeight / 2
         val offset = cy * rowStride + cx * pixelStride
         if (offset + 3 >= buffer.capacity()) return
 
@@ -116,23 +121,12 @@ class ScreenSyncService : Service() {
         val g = buffer.get(offset + 1).toInt() and 0xFF
         val b = buffer.get(offset + 2).toInt() and 0xFF
 
+        val now = System.currentTimeMillis()
+        if (now - lastSentAt < UPDATE_INTERVAL_MS) return
+        lastSentAt = now
+
         val hsv = FloatArray(3)
         Color.RGBToHSV(r, g, b, hsv)
-
-        maybeSend(hsv)
-    }
-
-    private fun maybeSend(hsv: FloatArray) {
-        val now = System.currentTimeMillis()
-        val last = lastSentHsv
-        val changedEnough = last == null ||
-            kotlin.math.abs(last[0] - hsv[0]) > 8f ||
-            kotlin.math.abs(last[1] - hsv[1]) > 0.06f ||
-            kotlin.math.abs(last[2] - hsv[2]) > 0.06f
-
-        if (now - lastSentAt < MIN_INTERVAL_MS || !changedEnough) return
-        lastSentAt = now
-        lastSentHsv = hsv
 
         val hue = hsv[0].toInt().coerceIn(0, 360)
         val sat = (hsv[1] * 1000).toInt().coerceIn(0, 1000)
@@ -174,8 +168,7 @@ class ScreenSyncService : Service() {
         private const val TAG = "ScreenSyncService"
         private const val CHANNEL_ID = "screen_sync"
         private const val NOTIF_ID = 42
-        private const val CAPTURE_SIZE = 64
-        private const val MIN_INTERVAL_MS = 1200L
+        private const val UPDATE_INTERVAL_MS = 250L // 4 updates/sec
         const val ACTION_STOP = "com.wipro.bulb.control.STOP_SCREEN_SYNC"
         const val EXTRA_RESULT_CODE = "resultCode"
         const val EXTRA_RESULT_DATA = "resultData"
