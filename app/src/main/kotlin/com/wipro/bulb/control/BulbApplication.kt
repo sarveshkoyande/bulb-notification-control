@@ -21,7 +21,31 @@ class BulbApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        installCrashLogger()
         initThingSdk()
+    }
+
+    /**
+     * The Thing SDK spins up its own background threads for BLE scanning/pairing.
+     * An uncaught exception there kills the app silently with no logcat clue unless
+     * we install a global handler that writes the trace to a file we can inspect.
+     */
+    private fun installCrashLogger() {
+        val default = Thread.getDefaultUncaughtExceptionHandler()
+        Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
+            try {
+                val sw = java.io.StringWriter()
+                throwable.printStackTrace(java.io.PrintWriter(sw))
+                val text = "FATAL on ${thread.name}\n$sw"
+                Log.e(TAG, text)
+                getExternalFilesDir(null)?.let { dir ->
+                    java.io.File(dir, "last_crash.txt").writeText(text)
+                }
+            } catch (_: Throwable) {
+                // never let the logger itself block the real crash handler
+            }
+            default?.uncaughtException(thread, throwable)
+        }
     }
 
     private fun initThingSdk() {

@@ -31,19 +31,21 @@ class PairingHelper(private val activity: Activity, private val onLog: (String) 
 
     fun createHome(name: String) {
         onLog("Creating home '$name' …")
-        ThingHomeSdk.getHomeManagerInstance().createHome(
-            name, 0.0, 0.0, "",
-            mutableListOf(),
-            object : IThingHomeResultCallback {
-                override fun onSuccess(bean: HomeBean?) {
-                    currentHomeId = bean?.homeId ?: 0L
-                    onLog("✓ Home created, homeId=$currentHomeId")
+        runCatching {
+            ThingHomeSdk.getHomeManagerInstance().createHome(
+                name, 0.0, 0.0, "",
+                mutableListOf(),
+                object : IThingHomeResultCallback {
+                    override fun onSuccess(bean: HomeBean?) {
+                        currentHomeId = bean?.homeId ?: 0L
+                        onLog("✓ Home created, homeId=$currentHomeId")
+                    }
+                    override fun onError(code: String?, error: String?) {
+                        onLog("✗ createHome failed [$code] $error")
+                    }
                 }
-                override fun onError(code: String?, error: String?) {
-                    onLog("✗ createHome failed [$code] $error")
-                }
-            }
-        )
+            )
+        }.onFailure { logCrash("createHome", it) }
     }
 
     /**
@@ -56,31 +58,40 @@ class PairingHelper(private val activity: Activity, private val onLog: (String) 
             onLog("✗ No home yet — tap 'Create Home' first")
             return
         }
+        if (!hasBlePermissions()) {
+            onLog("✗ Missing BLE/location permission(s): ${missingPermissions().joinToString()}")
+            onLog("→ Grant them (re-open app, allow prompts) and retry")
+            return
+        }
         onLog("Scanning for BLE/beacon devices (60s) — power-cycle the bulb now…")
 
-        scanKey = ThingActivatorCoreKit.getScanDeviceManager().startBlueToothDeviceSearch(
-            60_000L,
-            arrayListOf(ScanType.SINGLE, ScanType.THING_BEACON),
-            object : ThingActivatorScanCallback {
-                override fun deviceFound(deviceBean: ThingActivatorScanDeviceBean) {
-                    onLog("✓ Found device: uniqueId=${deviceBean.uniqueId} pid=${deviceBean.pid}")
-                    stopScan()
-                    pair(deviceBean)
+        runCatching {
+            scanKey = ThingActivatorCoreKit.getScanDeviceManager().startBlueToothDeviceSearch(
+                60_000L,
+                arrayListOf(ScanType.SINGLE, ScanType.THING_BEACON),
+                object : ThingActivatorScanCallback {
+                    override fun deviceFound(deviceBean: ThingActivatorScanDeviceBean) {
+                        onLog("✓ Found device: uniqueId=${deviceBean.uniqueId} pid=${deviceBean.pid}")
+                        stopScan()
+                        pair(deviceBean)
+                    }
+                    override fun deviceRepeat(deviceBean: ThingActivatorScanDeviceBean) {}
+                    override fun deviceUpdate(deviceBean: ThingActivatorScanDeviceBean) {}
+                    override fun scanFailure(failureBean: ThingActivatorScanFailureBean) {
+                        onLog("✗ scan failure: $failureBean")
+                    }
+                    override fun scanFinish() {
+                        onLog("Scan window finished (no more devices)")
+                    }
                 }
-                override fun deviceRepeat(deviceBean: ThingActivatorScanDeviceBean) {}
-                override fun deviceUpdate(deviceBean: ThingActivatorScanDeviceBean) {}
-                override fun scanFailure(failureBean: ThingActivatorScanFailureBean) {
-                    onLog("✗ scan failure: $failureBean")
-                }
-                override fun scanFinish() {
-                    onLog("Scan window finished (no more devices)")
-                }
-            }
-        )
+            )
+        }.onFailure { logCrash("startBlueToothDeviceSearch", it) }
     }
 
     fun stopScan() {
-        scanKey?.let { ThingActivatorCoreKit.getScanDeviceManager().stopScan(it) }
+        runCatching {
+            scanKey?.let { ThingActivatorCoreKit.getScanDeviceManager().stopScan(it) }
+        }.onFailure { logCrash("stopScan", it) }
         scanKey = null
     }
 
@@ -92,30 +103,54 @@ class PairingHelper(private val activity: Activity, private val onLog: (String) 
         }
         onLog("Pairing via mode=$mode …")
 
-        val activeManager = ThingActivatorCoreKit.getActiveManager().newThingActiveManager()
-        activeManager.startActive(ThingDeviceActiveBuilder().apply {
-            activeModel = mode
-            setActivatorScanDeviceBean(deviceBean)
-            timeOut = 60
-            relationId = currentHomeId
-            listener = object : IThingDeviceActiveListener {
-                override fun onFind(devId: String) {
-                    onLog("… found devId=$devId")
+        runCatching {
+            val activeManager = ThingActivatorCoreKit.getActiveManager().newThingActiveManager()
+            activeManager.startActive(ThingDeviceActiveBuilder().apply {
+                activeModel = mode
+                setActivatorScanDeviceBean(deviceBean)
+                timeOut = 60
+                relationId = currentHomeId
+                listener = object : IThingDeviceActiveListener {
+                    override fun onFind(devId: String) {
+                        onLog("… found devId=$devId")
+                    }
+                    override fun onBind(devId: String) {
+                        onLog("… bound devId=$devId")
+                    }
+                    override fun onActiveSuccess(deviceBean: DeviceBean) {
+                        onLog("✓ PAIRED — devId=${deviceBean.devId} name=${deviceBean.name}")
+                        onLog("Save this devId to control the bulb via publishDps.")
+                    }
+                    override fun onActiveError(errorBean: ThingDeviceActiveErrorBean) {
+                        onLog("✗ Pairing error: $errorBean")
+                    }
+                    override fun onActiveLimited(limitBean: ThingDeviceActiveLimitBean) {
+                        onLog("✗ Pairing limited: $limitBean")
+                    }
                 }
-                override fun onBind(devId: String) {
-                    onLog("… bound devId=$devId")
-                }
-                override fun onActiveSuccess(deviceBean: DeviceBean) {
-                    onLog("✓ PAIRED — devId=${deviceBean.devId} name=${deviceBean.name}")
-                    onLog("Save this devId to control the bulb via publishDps.")
-                }
-                override fun onActiveError(errorBean: ThingDeviceActiveErrorBean) {
-                    onLog("✗ Pairing error: $errorBean")
-                }
-                override fun onActiveLimited(limitBean: ThingDeviceActiveLimitBean) {
-                    onLog("✗ Pairing limited: $limitBean")
-                }
-            }
-        })
+            })
+        }.onFailure { logCrash("startActive", it) }
+    }
+
+    private fun hasBlePermissions(): Boolean = missingPermissions().isEmpty()
+
+    private fun missingPermissions(): List<String> {
+        val needed = mutableListOf<String>()
+        val perms = mutableListOf(android.Manifest.permission.ACCESS_FINE_LOCATION)
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+            perms += android.Manifest.permission.BLUETOOTH_SCAN
+            perms += android.Manifest.permission.BLUETOOTH_CONNECT
+        }
+        for (p in perms) {
+            if (androidx.core.content.ContextCompat.checkSelfPermission(activity, p)
+                != android.content.pm.PackageManager.PERMISSION_GRANTED
+            ) needed += p.substringAfterLast('.')
+        }
+        return needed
+    }
+
+    private fun logCrash(where: String, t: Throwable) {
+        onLog("✗ CRASH in $where: ${t.javaClass.simpleName}: ${t.message}")
+        android.util.Log.e("PairingHelper", "crash in $where", t)
     }
 }
