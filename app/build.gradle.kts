@@ -106,9 +106,13 @@ android {
     }
 }
 
-// Required by the Thing SDK integration guide.
+// Required by the Thing SDK integration guide (and the official BizSdkSample repo).
 configurations.all {
     exclude(group = "com.thingclips.smart", module = "thingsmart-modularCampAnno")
+    exclude(group = "com.thingclips.smart", module = "thingsmart-geofence-huawei")
+    exclude(group = "com.thingclips.smart", module = "thingplugin-annotation")
+    exclude(group = "com.thingclips.android.module", module = "thingmodule-annotation")
+    resolutionStrategy.cacheChangingModulesFor(0, "seconds")
 }
 
 dependencies {
@@ -123,6 +127,10 @@ dependencies {
     implementation("com.alibaba:fastjson:1.1.67.android")
     implementation("com.squareup.okhttp3:okhttp-urlconnection:3.14.9")
     implementation("com.thingclips.smart:thingsmart:7.8.0")
+
+    // Device pairing (activator) kit — verified against real 7.8.0 class files via javap,
+    // matched against Tuya's official BizSdkSample (DeviceConfigBleActivity.kt), NOT guessed.
+    implementation("com.thingclips.smart:thingsmart-activator-core-kit:7.8.0")
 
     // App-specific security algorithm library (replaces the old t_s.bmp image).
     implementation(fileTree(mapOf("dir" to "libs", "include" to listOf("*.aar"))))

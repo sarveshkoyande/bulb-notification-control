@@ -31,6 +31,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var emailField: EditText
     private lateinit var codeField: EditText
     private lateinit var passwordField: EditText
+    private lateinit var pairing: PairingHelper
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -41,6 +42,7 @@ class MainActivity : AppCompatActivity() {
         val buttons = findViewById<LinearLayout>(R.id.testButtonsContainer)
 
         broadcaster = TuyaBeaconBroadcaster(this) { logMessage(it) }
+        pairing = PairingHelper(this) { logMessage(it) }
 
         enableListenerBtn.setOnClickListener {
             startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
@@ -63,6 +65,11 @@ class MainActivity : AppCompatActivity() {
         addButton(buttons, "1. Send verify code") { sendVerifyCode() }
         addButton(buttons, "2. Register account") { registerAccount() }
         addButton(buttons, "3. Login") { login() }
+
+        // ---- Pairing (after login) ----
+        addLabel(buttons, "— Pair the bulb —")
+        addButton(buttons, "4. Create Home") { if (sdkReady()) pairing.createHome("Bulb Home") }
+        addButton(buttons, "5. Search & Pair Bulb (60s)") { if (sdkReady()) pairing.searchAndPairBulb() }
 
         requestPermissions()
         startService(Intent(this, BulbControlService::class.java))
