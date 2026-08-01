@@ -3,15 +3,18 @@ package com.wipro.bulb.control
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.Color
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import android.text.InputType
 import android.util.Log
+import android.view.View
 import android.widget.Button
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ScrollView
+import android.widget.SeekBar
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
@@ -41,6 +44,8 @@ class MainActivity : AppCompatActivity() {
         logTextView = findViewById(R.id.logText)
         val enableListenerBtn = findViewById<Button>(R.id.enableListenerBtn)
         val buttons = findViewById<LinearLayout>(R.id.testButtonsContainer)
+        val logScrollView = findViewById<ScrollView>(R.id.logScrollView)
+        val toggleLogBtn = findViewById<Button>(R.id.toggleLogBtn)
 
         broadcaster = TuyaBeaconBroadcaster(this) { logMessage(it) }
         sdkControl = BulbSdkController(this) { logMessage(it) }
@@ -52,6 +57,14 @@ class MainActivity : AppCompatActivity() {
         enableListenerBtn.setOnClickListener {
             startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
         }
+
+        toggleLogBtn.setOnClickListener {
+            val show = logScrollView.visibility != View.VISIBLE
+            logScrollView.visibility = if (show) View.VISIBLE else View.GONE
+            toggleLogBtn.text = if (show) "Minimize" else "Maximize"
+        }
+
+        setupControlPanel()
 
         // ---- Existing replay control (works today) ----
         addLabel(buttons, "— Replay mode (captured packets) —")
@@ -76,21 +89,112 @@ class MainActivity : AppCompatActivity() {
         addButton(buttons, "4. Create Home") { if (sdkReady()) pairing.createHome("Bulb Home") }
         addButton(buttons, "5. Search & Pair Bulb (60s)") { if (sdkReady()) pairing.searchAndPairBulb() }
 
-        // ---- Real control via SDK (works once paired — arbitrary colour!) ----
-        addLabel(buttons, "— SDK control (real, arbitrary colour) —")
-        addButton(buttons, "SDK: Turn ON") { sdkControl.turnOn() }
-        addButton(buttons, "SDK: Turn OFF") { sdkControl.turnOff() }
-        addButton(buttons, "SDK: Red") { sdkControl.setColor(0, 1000, 1000) }
-        addButton(buttons, "SDK: Green") { sdkControl.setColor(120, 1000, 1000) }
-        addButton(buttons, "SDK: Blue") { sdkControl.setColor(240, 1000, 1000) }
-        addButton(buttons, "SDK: Purple") { sdkControl.setColor(280, 1000, 1000) }
-        addButton(buttons, "SDK: White 50%") { sdkControl.setBrightness(500) }
-
         requestPermissions()
         startService(Intent(this, BulbControlService::class.java))
         logMessage("Ready. Broadcaster mode (Tuya beacon).")
         logMessage(BulbApplication.sdkStatus)
         sdkControl.devId?.let { logMessage("Previously paired devId: $it") }
+    }
+
+    // ---------- Bulb control panel (White / Colour, sliders) ----------
+
+    private var isOn = true
+
+    private fun setupControlPanel() {
+        val modeWhiteBtn = findViewById<Button>(R.id.modeWhiteBtn)
+        val modeColourBtn = findViewById<Button>(R.id.modeColourBtn)
+        val powerToggleBtn = findViewById<Button>(R.id.powerToggleBtn)
+        val colorPreview = findViewById<View>(R.id.colorPreview)
+
+        val colourGroup = findViewById<LinearLayout>(R.id.colourControlsGroup)
+        val whiteGroup = findViewById<LinearLayout>(R.id.whiteControlsGroup)
+
+        val hueBar = findViewById<SeekBar>(R.id.hueSeekBar)
+        val satBar = findViewById<SeekBar>(R.id.satSeekBar)
+        val valBar = findViewById<SeekBar>(R.id.valSeekBar)
+        val hueLabel = findViewById<TextView>(R.id.hueLabel)
+        val satLabel = findViewById<TextView>(R.id.satLabel)
+        val valLabel = findViewById<TextView>(R.id.valLabel)
+
+        val brightBar = findViewById<SeekBar>(R.id.brightSeekBar)
+        val tempBar = findViewById<SeekBar>(R.id.tempSeekBar)
+        val brightLabel = findViewById<TextView>(R.id.brightLabel)
+        val tempLabel = findViewById<TextView>(R.id.tempLabel)
+
+        fun updatePreview() {
+            val hsv = floatArrayOf(hueBar.progress.toFloat(), satBar.progress / 1000f, valBar.progress / 1000f)
+            colorPreview.setBackgroundColor(Color.HSVToColor(hsv))
+        }
+
+        fun showColourMode(show: Boolean) {
+            colourGroup.visibility = if (show) View.VISIBLE else View.GONE
+            whiteGroup.visibility = if (show) View.GONE else View.VISIBLE
+        }
+
+        modeWhiteBtn.setOnClickListener {
+            showColourMode(false)
+            sdkControl.setColorTemp(tempBar.progress)
+        }
+        modeColourBtn.setOnClickListener {
+            showColourMode(true)
+            updatePreview()
+            sdkControl.setColor(hueBar.progress, satBar.progress, valBar.progress)
+        }
+        powerToggleBtn.setOnClickListener {
+            isOn = !isOn
+            if (isOn) sdkControl.turnOn() else sdkControl.turnOff()
+            powerToggleBtn.text = if (isOn) "Turn OFF" else "Turn ON"
+        }
+
+        val debouncer = SliderDebouncer(handlerDelayMs = 200)
+
+        hueBar.setOnSeekBarChangeListener(seekListener { progress ->
+            hueLabel.text = "Hue: $progress"
+            updatePreview()
+            debouncer.run { sdkControl.setColor(hueBar.progress, satBar.progress, valBar.progress) }
+        })
+        satBar.setOnSeekBarChangeListener(seekListener { progress ->
+            satLabel.text = "Saturation: $progress"
+            updatePreview()
+            debouncer.run { sdkControl.setColor(hueBar.progress, satBar.progress, valBar.progress) }
+        })
+        valBar.setOnSeekBarChangeListener(seekListener { progress ->
+            valLabel.text = "Brightness: $progress"
+            updatePreview()
+            debouncer.run { sdkControl.setColor(hueBar.progress, satBar.progress, valBar.progress) }
+        })
+
+        brightBar.setOnSeekBarChangeListener(seekListener { progress ->
+            val v = progress + 10 // seekbar max=990 -> real range 10..1000
+            brightLabel.text = "Brightness: $v"
+            debouncer.run { sdkControl.setBrightness(v) }
+        })
+        tempBar.setOnSeekBarChangeListener(seekListener { progress ->
+            tempLabel.text = "Warmth (0=warm, 1000=cool): $progress"
+            debouncer.run { sdkControl.setColorTemp(progress) }
+        })
+
+        updatePreview()
+    }
+
+    private fun seekListener(onChange: (Int) -> Unit) = object : SeekBar.OnSeekBarChangeListener {
+        override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
+            if (fromUser) onChange(progress)
+        }
+        override fun onStartTrackingTouch(seekBar: SeekBar?) {}
+        override fun onStopTrackingTouch(seekBar: SeekBar?) {}
+    }
+
+    /** Coalesces rapid slider drags into one publishDps ~200ms after the last move. */
+    private inner class SliderDebouncer(private val handlerDelayMs: Long) {
+        private val handler = android.os.Handler(android.os.Looper.getMainLooper())
+        private var pending: Runnable? = null
+        fun run(action: () -> Unit) {
+            pending?.let { handler.removeCallbacks(it) }
+            val r = Runnable { action() }
+            pending = r
+            handler.postDelayed(r, handlerDelayMs)
+        }
     }
 
     // ---------- Thing SDK ----------
