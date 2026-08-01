@@ -110,6 +110,11 @@ class PairingHelper(private val activity: Activity, private val onLog: (String) 
                 setActivatorScanDeviceBean(deviceBean)
                 timeOut = 60
                 relationId = currentHomeId
+                // The SDK's internal startActive() null-checks these lists even for a
+                // BEACON single-device pair that doesn't use mesh — empty, not null.
+                setMeshSearchBeans(mutableListOf())
+                setLightningSearchBeans(mutableListOf())
+                setDevList(mutableListOf())
                 listener = object : IThingDeviceActiveListener {
                     override fun onFind(devId: String) {
                         onLog("… found devId=$devId")
