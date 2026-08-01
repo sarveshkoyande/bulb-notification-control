@@ -72,6 +72,27 @@ class BulbSdkController(context: Context, private val onLog: (String) -> Unit) {
         handler.postDelayed({ after() }, MODE_SWITCH_DELAY_MS)
     }
 
+    /**
+     * Logs the device's real DP schema + current dp values from the SDK's local cache.
+     * Ground truth for which DP id is actually colour_data_v2 on this specific device —
+     * DP5 is Tuya's usual convention but was never directly confirmed for this product.
+     */
+    fun queryDeviceInfo() {
+        val id = devId
+        if (id == null) { onLog("✗ No paired devId yet"); return }
+        runCatching {
+            val bean = ThingHomeSdk.getDataInstance().getDeviceBean(id)
+            if (bean == null) {
+                onLog("✗ getDeviceBean returned null for $id")
+                return
+            }
+            onLog("schema: ${bean.schema}")
+            onLog("current dps: ${bean.dps}")
+        }.onFailure {
+            onLog("✗ queryDeviceInfo failed: ${it.javaClass.simpleName}: ${it.message}")
+        }
+    }
+
     private fun publish(dps: Map<String, Any>) {
         val id = devId
         if (id == null) {

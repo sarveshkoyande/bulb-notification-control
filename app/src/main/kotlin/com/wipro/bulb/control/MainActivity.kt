@@ -89,6 +89,9 @@ class MainActivity : AppCompatActivity() {
         addButton(buttons, "4. Create Home") { if (sdkReady()) pairing.createHome("Bulb Home") }
         addButton(buttons, "5. Search & Pair Bulb (60s)") { if (sdkReady()) pairing.searchAndPairBulb() }
 
+        addLabel(buttons, "— Debug —")
+        addButton(buttons, "Query device schema (real DP map)") { sdkControl.queryDeviceInfo() }
+
         requestPermissions()
         startService(Intent(this, BulbControlService::class.java))
         logMessage("Ready. Broadcaster mode (Tuya beacon).")
